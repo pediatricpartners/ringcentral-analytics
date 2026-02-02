@@ -729,7 +729,9 @@
                 }
 
                 const data = await response.json();
-                callsData = callsData.concat(data.records || []);
+                // Double-check: Filter to ensure only Inbound calls
+                const inboundOnly = (data.records || []).filter(call => call.direction === 'Inbound');
+                callsData = callsData.concat(inboundOnly);
 
                 hasMore = data.navigation?.nextPage;
                 page++;
@@ -737,6 +739,8 @@
                 // Safety limit
                 if (page > 10) break;
             }
+            
+            console.log(`Loaded ${callsData.length} inbound calls`);
         }
 
         // Update warning box based on metrics mode
@@ -755,9 +759,11 @@
 
         // Group calls by session using multiple identifiers for better accuracy
         function groupBySession(calls) {
+            // First, ensure we only have inbound calls
+            const inboundCalls = calls.filter(call => call.direction === 'Inbound');
             const sessions = {};
             
-            calls.forEach(call => {
+            inboundCalls.forEach(call => {
                 // For call queues, group by sessionId + caller phone number + time window
                 // This handles cases where telephonySessionId might be missing or inconsistent
                 const sessionId = call.sessionId || call.telephonySessionId;
@@ -824,8 +830,11 @@
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const groupBy = document.getElementById('groupBy').value;
             
+            // Filter to inbound only (patient calls)
+            const inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            
             // Use session-based data if enabled
-            const dataToAnalyze = useSessionGrouping ? groupBySession(callsData) : callsData;
+            const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             
             // All calls are inbound (patient calls)
             const totalCalls = dataToAnalyze.length;
@@ -852,9 +861,9 @@
             
             let comparisonText = '';
             if (useSessionGrouping) {
-                const rawCount = callsData.length;
+                const rawCount = inboundOnly.length;
                 const diff = rawCount - totalCalls;
-                const groupedData = groupBySession(callsData);
+                const groupedData = groupBySession(inboundOnly);
                 const multiLegCalls = groupedData.filter(s => s.legCount && s.legCount > 1).length;
                 comparisonText = `<div class="kpi-comparison">Session-grouped: ${totalCalls} unique patient calls from ${rawCount} call records<br>${multiLegCalls} calls routed through queue/forwarding</div>`;
             }
@@ -917,7 +926,10 @@
         // Render charts
         function renderCharts() {
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
-            const dataToAnalyze = useSessionGrouping ? groupBySession(callsData) : callsData;
+            
+            // Filter to inbound only (patient calls)
+            const inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             const groupBy = document.getElementById('groupBy').value;
             
             // Destroy existing charts
@@ -1084,7 +1096,10 @@
         function renderCallTable() {
             const tbody = document.getElementById('callTableBody');
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
-            const dataToShow = useSessionGrouping ? groupBySession(callsData) : callsData;
+            
+            // Filter to inbound only (patient calls)
+            const inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            const dataToShow = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             const recentCalls = dataToShow.slice(0, 100); // Show last 100 calls
 
             tbody.innerHTML = recentCalls.map(call => {
