@@ -485,6 +485,13 @@
                             <option value="week">By Week</option>
                         </select>
                     </div>
+                    <div class="input-group">
+                        <label>Call Queue</label>
+                        <select id="queueFilter">
+                            <option value="all">All Queues</option>
+                            <!-- Queues populated dynamically -->
+                        </select>
+                    </div>
                     <button class="btn" onclick="refreshData()">Update Dashboard</button>
                 </div>
                 
@@ -547,6 +554,12 @@
                     <tbody id="callTableBody"></tbody>
                 </table>
             </div>
+
+            <!-- Version Footer -->
+            <div style="text-align: center; padding: 20px; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; margin-top: 40px; background: #f9f9f9;">
+                <strong>Dashboard Version:</strong> v2.1.0 - Call Queue Filtering<br>
+                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-queuefilter | Last Updated: Feb 2, 2026 9:00 AM EST</span>
+            </div>
         </div>
     </div>
 
@@ -567,6 +580,7 @@
 
         let accessToken = null;
         let callsData = [];
+        let callQueues = [];
         let charts = {};
         let sortDirection = {};
         let currentSortColumn = null;
@@ -726,6 +740,11 @@
             updateWarningBox();
 
             try {
+                // Load call queues if not already loaded
+                if (callQueues.length === 0) {
+                    await loadCallQueues();
+                }
+                
                 await loadCallLogs(fromDate, toDate);
                 calculateKPIs();
                 renderCharts();
@@ -734,6 +753,43 @@
                 showError('Error loading data: ' + error.message);
             } finally {
                 showLoading(false);
+            }
+        }
+
+        // Load call queues from RingCentral API
+        async function loadCallQueues() {
+            try {
+                const response = await fetch(
+                    `${RC_SERVER}/restapi/v1.0/account/~/call-queues`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    console.warn('Could not fetch call queues');
+                    return;
+                }
+
+                const data = await response.json();
+                callQueues = data.records || [];
+                
+                // Populate the queue filter dropdown
+                const queueFilter = document.getElementById('queueFilter');
+                queueFilter.innerHTML = '<option value="all">All Queues</option>';
+                
+                callQueues.forEach(queue => {
+                    const option = document.createElement('option');
+                    option.value = queue.extensionNumber;
+                    option.textContent = `${queue.name} (Ext ${queue.extensionNumber})`;
+                    queueFilter.appendChild(option);
+                });
+                
+                console.log(`Loaded ${callQueues.length} call queues`);
+            } catch (error) {
+                console.error('Error loading call queues:', error);
             }
         }
 
@@ -870,9 +926,21 @@
         function calculateKPIs() {
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const groupBy = document.getElementById('groupBy').value;
+            const selectedQueue = document.getElementById('queueFilter').value;
             
             // Filter to inbound only (patient calls)
-            const inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            
+            // Filter by call queue if selected
+            if (selectedQueue !== 'all') {
+                inboundOnly = inboundOnly.filter(call => {
+                    // Check if call went through the selected queue
+                    // Queue extension number is in the 'to' field for calls to that queue
+                    return call.to?.extensionNumber === selectedQueue ||
+                           // Also check if any leg went through the queue
+                           (call.legs && call.legs.some(leg => leg.to?.extensionNumber === selectedQueue));
+                });
+            }
             
             // Use session-based data if enabled
             const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
@@ -972,9 +1040,19 @@
         // Render charts
         function renderCharts() {
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
+            const selectedQueue = document.getElementById('queueFilter').value;
             
             // Filter to inbound only (patient calls)
-            const inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            
+            // Filter by call queue if selected
+            if (selectedQueue !== 'all') {
+                inboundOnly = inboundOnly.filter(call => {
+                    return call.to?.extensionNumber === selectedQueue ||
+                           (call.legs && call.legs.some(leg => leg.to?.extensionNumber === selectedQueue));
+                });
+            }
+            
             const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             const groupBy = document.getElementById('groupBy').value;
             
@@ -1145,9 +1223,19 @@
         function renderCallTable() {
             const tbody = document.getElementById('callTableBody');
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
+            const selectedQueue = document.getElementById('queueFilter').value;
             
             // Filter to inbound only (patient calls)
-            const inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            
+            // Filter by call queue if selected
+            if (selectedQueue !== 'all') {
+                inboundOnly = inboundOnly.filter(call => {
+                    return call.to?.extensionNumber === selectedQueue ||
+                           (call.legs && call.legs.some(leg => leg.to?.extensionNumber === selectedQueue));
+                });
+            }
+            
             const dataToShow = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             const recentCalls = dataToShow.slice(0, 100); // Show last 100 calls
 
@@ -1247,6 +1335,29 @@
         // Check if already authenticated
         window.onload = function() {
             accessToken = sessionStorage.getItem('rc_access_token');
+            
+            // Add event listeners for filters
+            const sessionGrouping = document.getElementById('useSessionGrouping');
+            if (sessionGrouping) {
+                sessionGrouping.addEventListener('change', function() {
+                    if (callsData.length > 0) {
+                        calculateKPIs();
+                        renderCharts();
+                        renderCallTable();
+                    }
+                });
+            }
+            
+            const queueFilter = document.getElementById('queueFilter');
+            if (queueFilter) {
+                queueFilter.addEventListener('change', function() {
+                    if (callsData.length > 0) {
+                        calculateKPIs();
+                        renderCharts();
+                        renderCallTable();
+                    }
+                });
+            }
             
             if (accessToken) {
                 showDashboard();
