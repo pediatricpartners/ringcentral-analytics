@@ -558,6 +558,13 @@
             : `${window.location.origin}${window.location.pathname}callback`;
         const RC_SERVER = 'https://platform.ringcentral.com'; // Use .devtest.ringcentral.com for sandbox
 
+        // Staff whitelist - calls answered by these are counted as "Staff Answered"
+        const STAFF_WHITELIST = {
+            extensions: ["34215","54708","44226","42356","34210","54703","44234","44206","34214","44237","44401","44222","44230","77704","44229","44236","44200","42771","77702","42407","52770","34213","44930","54702","54705","44232","54706","47777","44233","54711","44215","54710","59633"],
+            directNumbers: ["+15613224215","+15612274708","+15617454226","+15615102356","+15613224210","+15612274703","+15617454234","+15617454206","+15613224214","+15617454237","+15617454222","+15617454230","+15612274701","+15617454229","+15617454236","+15617454200","+15615102771","+15612274702","+15615102407","+15612274706","+15612274705","+15613224213","+15617454930","+15617194717","+15615102770","+15617454232","+15612274704","+15617454777","+15617454233","+15617410000","+15613938555","+15612274710"],
+            mobileNumbers: ["+15614601378","+15614945111","+15613890981","+15617194717","+15612152981","+15613007476","+15615919551","+15615078989"]
+        };
+
         let accessToken = null;
         let callsData = [];
         let charts = {};
@@ -572,6 +579,32 @@
             
             document.getElementById('toDate').valueAsDate = today;
             document.getElementById('fromDate').valueAsDate = thirtyDaysAgo;
+        }
+
+        // Check if call was answered by staff (not forwarded externally)
+        function isAnsweredByStaff(call) {
+            // If call wasn't answered at all, return false
+            if (call.result !== 'Accepted' && call.result !== 'Call connected') {
+                return false;
+            }
+            
+            // Check if answered by staff extension
+            if (call.to?.extensionNumber && STAFF_WHITELIST.extensions.includes(call.to.extensionNumber)) {
+                return true;
+            }
+            
+            // Check if answered by staff direct number
+            if (call.to?.phoneNumber && STAFF_WHITELIST.directNumbers.includes(call.to.phoneNumber)) {
+                return true;
+            }
+            
+            // Check if answered by staff mobile
+            if (call.to?.phoneNumber && STAFF_WHITELIST.mobileNumbers.includes(call.to.phoneNumber)) {
+                return true;
+            }
+            
+            // If answered but not by any staff number, it was forwarded externally
+            return false;
         }
 
         // OAuth Login
@@ -846,22 +879,27 @@
             
             // All calls are inbound (patient calls)
             const totalCalls = dataToAnalyze.length;
-            const answeredCalls = dataToAnalyze.filter(call => 
-                call.result === 'Accepted' || call.result === 'Call connected'
+            
+            // NEW: Separate staff-answered from externally forwarded
+            const staffAnswered = dataToAnalyze.filter(call => isAnsweredByStaff(call)).length;
+            const forwardedExternal = dataToAnalyze.filter(call => 
+                (call.result === 'Accepted' || call.result === 'Call connected') && !isAnsweredByStaff(call)
             ).length;
             const missedCalls = dataToAnalyze.filter(call => 
                 call.result === 'Missed' || call.result === 'No Answer'
             ).length;
             const voicemails = dataToAnalyze.filter(call => call.result === 'Voicemail').length;
 
-            const answerRate = totalCalls > 0 ? ((answeredCalls / totalCalls) * 100).toFixed(1) : 0;
+            const staffAnswerRate = totalCalls > 0 ? ((staffAnswered / totalCalls) * 100).toFixed(1) : 0;
+            const overallAnswerRate = totalCalls > 0 ? (((staffAnswered + forwardedExternal) / totalCalls) * 100).toFixed(1) : 0;
+            const forwardRate = totalCalls > 0 ? ((forwardedExternal / totalCalls) * 100).toFixed(1) : 0;
 
-            // Calculate average call duration (in seconds) - only for answered calls
-            const answeredCallsWithDuration = dataToAnalyze.filter(call => 
-                (call.result === 'Accepted' || call.result === 'Call connected') && call.duration > 0
+            // Calculate average call duration (in seconds) - only for staff-answered calls
+            const staffAnsweredWithDuration = dataToAnalyze.filter(call => 
+                isAnsweredByStaff(call) && call.duration > 0
             );
-            const avgDuration = answeredCallsWithDuration.length > 0 
-                ? answeredCallsWithDuration.reduce((sum, call) => sum + call.duration, 0) / answeredCallsWithDuration.length 
+            const avgDuration = staffAnsweredWithDuration.length > 0 
+                ? staffAnsweredWithDuration.reduce((sum, call) => sum + call.duration, 0) / staffAnsweredWithDuration.length 
                 : 0;
 
             // Display KPIs
@@ -885,38 +923,38 @@
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Answer Rate</div>
-                    <div class="kpi-value">${answerRate}%</div>
-                    <div class="kpi-subtitle">${answeredCalls} of ${totalCalls} patient calls answered</div>
-                    ${answerRate >= 90 ? '<div class="kpi-trend positive">✓ Excellent</div>' : 
-                      answerRate >= 80 ? '<div class="kpi-trend positive">✓ Good</div>' :
-                      answerRate >= 70 ? '<div class="kpi-trend">○ Fair</div>' :
+                    <div class="kpi-label">Staff Answer Rate</div>
+                    <div class="kpi-value">${staffAnswerRate}%</div>
+                    <div class="kpi-subtitle">${staffAnswered} answered by your staff</div>
+                    ${staffAnswerRate >= 90 ? '<div class="kpi-trend positive">✓ Excellent</div>' : 
+                      staffAnswerRate >= 80 ? '<div class="kpi-trend positive">✓ Good</div>' :
+                      staffAnswerRate >= 70 ? '<div class="kpi-trend">○ Fair</div>' :
                       '<div class="kpi-trend negative">↓ Needs Improvement</div>'}
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Missed Patient Calls</div>
+                    <div class="kpi-label">Forwarded External</div>
+                    <div class="kpi-value">${forwardedExternal}</div>
+                    <div class="kpi-subtitle">${forwardRate}% answered by external (doctors, etc.)</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-label">Missed by Staff</div>
                     <div class="kpi-value">${missedCalls}</div>
-                    <div class="kpi-subtitle">${((missedCalls/totalCalls)*100).toFixed(1)}% missed</div>
+                    <div class="kpi-subtitle">${((missedCalls/totalCalls)*100).toFixed(1)}% not answered at all</div>
                     ${missedCalls === 0 ? '<div class="kpi-trend positive">✓ Perfect!</div>' : ''}
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Avg Call Duration</div>
+                    <div class="kpi-label">Avg Staff Call Duration</div>
                     <div class="kpi-value">${formatDuration(avgDuration)}</div>
-                    <div class="kpi-subtitle">${answeredCallsWithDuration.length} answered calls</div>
+                    <div class="kpi-subtitle">${staffAnsweredWithDuration.length} staff-answered calls</div>
                 </div>
 
                 <div class="kpi-card">
                     <div class="kpi-label">Went to Voicemail</div>
                     <div class="kpi-value">${voicemails}</div>
-                    <div class="kpi-subtitle">${((voicemails/totalCalls)*100).toFixed(1)}% of patient calls</div>
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Patient Service Level</div>
-                    <div class="kpi-value">${(answeredCalls + voicemails > 0 ? (((answeredCalls + voicemails) / totalCalls) * 100).toFixed(1) : 0)}%</div>
-                    <div class="kpi-subtitle">Answered or captured in voicemail</div>
+                    <div class="kpi-subtitle">${((voicemails/totalCalls)*100).toFixed(1)}% left message</div>
                 </div>
             `;
             
@@ -1015,19 +1053,21 @@
                 }
             });
 
-            // Distribution chart (answered vs missed)
-            const answered = dataToAnalyze.filter(c => c.result === 'Accepted' || c.result === 'Call connected').length;
+            // Distribution chart (staff answered vs forwarded vs missed)
+            const staffAnswered = dataToAnalyze.filter(c => isAnsweredByStaff(c)).length;
+            const forwarded = dataToAnalyze.filter(c => 
+                (c.result === 'Accepted' || c.result === 'Call connected') && !isAnsweredByStaff(c)
+            ).length;
             const missed = dataToAnalyze.filter(c => c.result === 'Missed' || c.result === 'No Answer').length;
             const voicemail = dataToAnalyze.filter(c => c.result === 'Voicemail').length;
-            const other = dataToAnalyze.length - answered - missed - voicemail;
 
             charts.distributionChart = new Chart(document.getElementById('distributionChart'), {
                 type: 'doughnut',
                 data: {
-                    labels: ['Answered', 'Missed', 'Voicemail', 'Other'],
+                    labels: ['Staff Answered', 'Forwarded External', 'Missed', 'Voicemail'],
                     datasets: [{
-                        data: [answered, missed, voicemail, other],
-                        backgroundColor: ['#4caf50', '#e74c3c', '#ff9800', '#9e9e9e']
+                        data: [staffAnswered, forwarded, missed, voicemail],
+                        backgroundColor: ['#4caf50', '#2196f3', '#e74c3c', '#ff9800']
                     }]
                 },
                 options: {
@@ -1080,7 +1120,8 @@
                     grouped[key] = { total: 0, answered: 0, missed: 0 };
                 }
                 grouped[key].total++;
-                if (call.result === 'Accepted' || call.result === 'Call connected') {
+                // Count as answered only if answered by staff (not forwarded external)
+                if (isAnsweredByStaff(call)) {
                     grouped[key].answered++;
                 } else if (call.result === 'Missed' || call.result === 'No Answer') {
                     grouped[key].missed++;
