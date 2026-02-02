@@ -432,7 +432,7 @@
     <div class="container">
         <!-- Login Screen -->
         <div id="loginScreen" class="login-card">
-            <img src="logo.png" alt="Pediatric Partners" class="login-logo">
+            <img src="logo.jpg" alt="Pediatric Partners" class="login-logo">
             <h1>Pediatric Partners</h1>
             <p>Call Analytics Dashboard</p>
             
@@ -458,7 +458,7 @@
         <div id="dashboard" class="dashboard">
             <div class="header">
                 <div class="header-left">
-                    <img src="logo.png" alt="Pediatric Partners" class="header-logo">
+                    <img src="logo.jpg" alt="Pediatric Partners" class="header-logo">
                     <div>
                         <h1>Pediatric Partners Call Analytics</h1>
                         <div class="user-info" id="userInfo"></div>
@@ -766,18 +766,22 @@
             inboundCalls.forEach(call => {
                 // For call queues, group by sessionId + caller phone number + time window
                 // This handles cases where telephonySessionId might be missing or inconsistent
-                const sessionId = call.sessionId || call.telephonySessionId;
+                const sessionId = call.sessionId || call.telephonySessionId || call.id;
                 const callerPhone = call.from?.phoneNumber || 'unknown';
                 const callTime = new Date(call.startTime).getTime();
                 
                 // Create a composite key: sessionId-phoneNumber
-                // This groups all legs of the same call from the same caller
-                const compositeKey = `${sessionId}-${callerPhone}`;
+                // If no sessionId, group calls from same phone within 5 minutes
+                let compositeKey;
                 
-                if (!sessionId) {
-                    // If no session ID at all, treat as unique call
-                    sessions[call.id] = [call];
-                    return;
+                if (sessionId && sessionId !== call.id) {
+                    // Has a valid session ID - group by session + caller
+                    compositeKey = `${sessionId}-${callerPhone}`;
+                } else {
+                    // No session ID - group by caller phone + 5-minute time window
+                    // This catches cases where the same patient calls and gets routed multiple times
+                    const timeWindow = Math.floor(callTime / (5 * 60 * 1000)); // 5-minute windows
+                    compositeKey = `${callerPhone}-${timeWindow}`;
                 }
                 
                 if (!sessions[compositeKey]) {
@@ -801,7 +805,7 @@
                     ? sessionCalls.find(c => c.result === 'Accepted' || c.result === 'Call connected')
                     : sessionCalls[sessionCalls.length - 1];
                 
-                // Calculate total duration across all legs (use max to avoid double-counting)
+                // Calculate total duration - use the longest leg duration
                 const maxDuration = Math.max(...sessionCalls.map(c => c.duration || 0));
                 
                 // Determine final result based on priority: Answered > Voicemail > Missed
@@ -820,7 +824,8 @@
                     duration: maxDuration,
                     legs: sessionCalls,
                     sessionId: sessionCalls[0].sessionId || sessionCalls[0].telephonySessionId,
-                    legCount: sessionCalls.length
+                    legCount: sessionCalls.length,
+                    callerPhone: sessionCalls[0].from?.phoneNumber
                 };
             });
         }
