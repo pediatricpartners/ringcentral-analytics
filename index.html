@@ -448,7 +448,10 @@
 
     <script>
         // Configuration
-        const REDIRECT_URI = 'http://localhost:8000/callback';
+        // Automatically detects if running locally or on GitHub Pages
+        const REDIRECT_URI = window.location.hostname === 'localhost' 
+            ? 'http://localhost:8000/callback'
+            : `${window.location.origin}${window.location.pathname}callback`;
         const RC_SERVER = 'https://platform.ringcentral.com'; // Use .devtest.ringcentral.com for sandbox
 
         let accessToken = null;
