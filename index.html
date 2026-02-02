@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RingCentral Analytics Dashboard</title>
+    <title>Pediatric Partners - Call Analytics Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
@@ -32,6 +32,12 @@
             text-align: center;
             max-width: 500px;
             margin: 100px auto;
+        }
+
+        .login-logo {
+            height: 80px;
+            width: auto;
+            margin-bottom: 20px;
         }
 
         .login-card h1 {
@@ -72,7 +78,7 @@
             font-weight: 500;
         }
 
-        .input-group input {
+        .input-group input, .input-group select {
             width: 100%;
             padding: 12px;
             border: 2px solid #e0e0e0;
@@ -81,7 +87,7 @@
             transition: border-color 0.3s;
         }
 
-        .input-group input:focus {
+        .input-group input:focus, .input-group select:focus {
             outline: none;
             border-color: #667eea;
         }
@@ -129,6 +135,17 @@
             align-items: center;
         }
 
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .header-logo {
+            height: 60px;
+            width: auto;
+        }
+
         .header h1 {
             color: #333;
             font-size: 28px;
@@ -162,8 +179,43 @@
 
         .date-filters .input-group {
             flex: 1;
-            min-width: 200px;
+            min-width: 150px;
             margin-bottom: 0;
+        }
+
+        .metrics-toggle {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .metrics-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #555;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .metrics-toggle input[type="checkbox"] {
+            width: auto;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .warning-box strong {
+            display: block;
+            margin-bottom: 5px;
         }
 
         .kpi-grid {
@@ -223,6 +275,14 @@
         .kpi-trend.negative {
             background: #f8d7da;
             color: #721c24;
+        }
+
+        .kpi-comparison {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #f0f0f0;
+            font-size: 12px;
+            color: #666;
         }
 
         .charts-grid {
@@ -311,6 +371,27 @@
             font-weight: 600;
             color: #555;
             border-bottom: 2px solid #e0e0e0;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        th:hover {
+            background: #e9ecef;
+        }
+
+        th.sortable::after {
+            content: ' ⇅';
+            opacity: 0.3;
+        }
+
+        th.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+
+        th.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
         }
 
         td {
@@ -351,8 +432,9 @@
     <div class="container">
         <!-- Login Screen -->
         <div id="loginScreen" class="login-card">
-            <h1>📊 RingCentral Analytics</h1>
-            <p>Track your call metrics and performance</p>
+            <img src="logo.png" alt="Pediatric Partners" class="login-logo">
+            <h1>Pediatric Partners</h1>
+            <p>Call Analytics Dashboard</p>
             
             <div class="config-section">
                 <h3>⚙️ Setup Your Credentials</h3>
@@ -375,9 +457,12 @@
         <!-- Dashboard -->
         <div id="dashboard" class="dashboard">
             <div class="header">
-                <div>
-                    <h1>📊 Call Analytics Dashboard</h1>
-                    <div class="user-info" id="userInfo"></div>
+                <div class="header-left">
+                    <img src="logo.png" alt="Pediatric Partners" class="header-logo">
+                    <div>
+                        <h1>Pediatric Partners Call Analytics</h1>
+                        <div class="user-info" id="userInfo"></div>
+                    </div>
                 </div>
                 <button class="btn logout-btn" onclick="logout()">Logout</button>
             </div>
@@ -392,8 +477,28 @@
                         <label>To Date</label>
                         <input type="date" id="toDate">
                     </div>
+                    <div class="input-group">
+                        <label>Group By</label>
+                        <select id="groupBy">
+                            <option value="total">Total (All Time)</option>
+                            <option value="day">By Day</option>
+                            <option value="week">By Week</option>
+                        </select>
+                    </div>
                     <button class="btn" onclick="refreshData()">Update Dashboard</button>
                 </div>
+                
+                <div class="metrics-toggle">
+                    <label>
+                        <input type="checkbox" id="useSessionGrouping" checked>
+                        <strong>Use Session-Based Metrics (Recommended)</strong> - Groups multi-leg calls for accurate answer rates
+                    </label>
+                </div>
+            </div>
+
+            <div id="warningBox" class="warning-box" style="display: none;">
+                <strong>⚠️ Metric Calculation Mode:</strong>
+                <span id="warningText"></span>
             </div>
 
             <div id="loading" class="loading" style="display: none;">
@@ -407,16 +512,20 @@
 
             <div class="charts-grid">
                 <div class="chart-card">
-                    <h3>📈 Calls Over Time</h3>
-                    <canvas id="callsChart"></canvas>
+                    <h3>📈 Answer Rate Over Time</h3>
+                    <canvas id="answerRateChart"></canvas>
                 </div>
                 <div class="chart-card">
-                    <h3>📊 Call Distribution</h3>
-                    <canvas id="distributionChart"></canvas>
+                    <h3>📊 Call Volume Over Time</h3>
+                    <canvas id="callsChart"></canvas>
                 </div>
             </div>
 
             <div class="charts-grid">
+                <div class="chart-card">
+                    <h3>📉 Call Distribution</h3>
+                    <canvas id="distributionChart"></canvas>
+                </div>
                 <div class="chart-card">
                     <h3>🕐 Calls by Hour of Day</h3>
                     <canvas id="hourlyChart"></canvas>
@@ -428,16 +537,16 @@
             </div>
 
             <div class="call-table">
-                <h3>Recent Call Log</h3>
+                <h3>Recent Call Log (Click headers to sort)</h3>
                 <table id="callTable">
                     <thead>
                         <tr>
-                            <th>Date/Time</th>
-                            <th>Direction</th>
-                            <th>From</th>
-                            <th>To</th>
-                            <th>Duration</th>
-                            <th>Status</th>
+                            <th class="sortable" data-sort="startTime">Date/Time</th>
+                            <th class="sortable" data-sort="direction">Direction</th>
+                            <th class="sortable" data-sort="from">From</th>
+                            <th class="sortable" data-sort="to">To</th>
+                            <th class="sortable" data-sort="duration">Duration</th>
+                            <th class="sortable" data-sort="result">Status</th>
                         </tr>
                     </thead>
                     <tbody id="callTableBody"></tbody>
@@ -457,6 +566,8 @@
         let accessToken = null;
         let callsData = [];
         let charts = {};
+        let sortDirection = {};
+        let currentSortColumn = null;
 
         // Initialize date inputs to last 30 days
         function initializeDates() {
@@ -523,7 +634,7 @@
                         }
 
                         // Clean URL
-                        window.history.replaceState({}, document.title, '/');
+                        window.history.replaceState({}, document.title, window.location.pathname);
                         
                         showDashboard();
                     } else {
@@ -543,6 +654,14 @@
             initializeDates();
             await loadUserInfo();
             await refreshData();
+            
+            // Add event listener for session grouping checkbox
+            document.getElementById('useSessionGrouping').addEventListener('change', function() {
+                if (callsData.length > 0) {
+                    calculateKPIs();
+                    renderCharts();
+                }
+            });
         }
 
         // Load user info
@@ -555,8 +674,10 @@
                 });
 
                 const data = await response.json();
+                const name = `${data.contact?.firstName || ''} ${data.contact?.lastName || ''}`.trim();
+                const ext = data.extensionNumber || '';
                 document.getElementById('userInfo').textContent = 
-                    `Logged in as: ${data.contact?.firstName || ''} ${data.contact?.lastName || ''} (${data.extensionNumber || ''})`;
+                    `Logged in as: ${name || 'User'} ${ext ? `(Ext ${ext})` : ''}`;
             } catch (error) {
                 console.error('Error loading user info:', error);
             }
@@ -574,6 +695,7 @@
 
             showLoading(true);
             hideError();
+            updateWarningBox();
 
             try {
                 await loadCallLogs(fromDate, toDate);
@@ -599,7 +721,7 @@
             while (hasMore) {
                 const response = await fetch(
                     `${RC_SERVER}/restapi/v1.0/account/~/call-log?` +
-                    `dateFrom=${from}&dateTo=${to}&page=${page}&perPage=1000`,
+                    `dateFrom=${from}&dateTo=${to}&page=${page}&perPage=1000&view=Detailed`,
                     {
                         headers: {
                             'Authorization': `Bearer ${accessToken}`
@@ -622,30 +744,122 @@
             }
         }
 
+        // Update warning box based on metrics mode
+        function updateWarningBox() {
+            const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
+            const warningBox = document.getElementById('warningBox');
+            const warningText = document.getElementById('warningText');
+            
+            if (!useSessionGrouping) {
+                warningBox.style.display = 'block';
+                warningText.textContent = 'You are viewing RAW call records. Multi-leg calls (forwarded, transferred) are counted multiple times, which may inflate metrics. Enable session-based metrics for accuracy.';
+            } else {
+                warningBox.style.display = 'none';
+            }
+        }
+
+        // Group calls by telephony session ID
+        function groupBySession(calls) {
+            const sessions = {};
+            
+            calls.forEach(call => {
+                const sessionId = call.telephonySessionId;
+                if (!sessionId) {
+                    // If no session ID, treat as unique call
+                    sessions[call.id] = [call];
+                    return;
+                }
+                
+                if (!sessions[sessionId]) {
+                    sessions[sessionId] = [];
+                }
+                sessions[sessionId].push(call);
+            });
+            
+            // For each session, determine the final outcome
+            return Object.values(sessions).map(sessionCalls => {
+                // Sort by start time to get chronological order
+                sessionCalls.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+                
+                // Determine final result - if ANY leg was answered, the session was answered
+                const hasAnswered = sessionCalls.some(c => c.result === 'Accepted' || c.result === 'Call connected');
+                const hasVoicemail = sessionCalls.some(c => c.result === 'Voicemail');
+                const hasMissed = sessionCalls.some(c => c.result === 'Missed' || c.result === 'No Answer');
+                
+                // Get the most representative call (typically the last one or an answered one)
+                const representativeCall = hasAnswered 
+                    ? sessionCalls.find(c => c.result === 'Accepted' || c.result === 'Call connected')
+                    : sessionCalls[sessionCalls.length - 1];
+                
+                // Calculate total duration across all legs
+                const totalDuration = sessionCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
+                
+                // Determine final result
+                let finalResult = representativeCall.result;
+                if (hasAnswered) {
+                    finalResult = 'Accepted';
+                } else if (hasVoicemail) {
+                    finalResult = 'Voicemail';
+                } else if (hasMissed) {
+                    finalResult = 'Missed';
+                }
+                
+                return {
+                    ...representativeCall,
+                    result: finalResult,
+                    duration: Math.max(totalDuration, representativeCall.duration || 0),
+                    legs: sessionCalls,
+                    sessionId: sessionCalls[0].telephonySessionId
+                };
+            });
+        }
+
         // Calculate KPIs
         function calculateKPIs() {
-            const totalCalls = callsData.length;
-            const answeredCalls = callsData.filter(call => call.result === 'Accepted' || call.result === 'Call connected').length;
-            const missedCalls = callsData.filter(call => call.result === 'Missed' || call.result === 'No Answer').length;
-            const voicemails = callsData.filter(call => call.result === 'Voicemail').length;
-            const inboundCalls = callsData.filter(call => call.direction === 'Inbound').length;
-            const outboundCalls = callsData.filter(call => call.direction === 'Outbound').length;
+            const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
+            const groupBy = document.getElementById('groupBy').value;
+            
+            // Use session-based data if enabled
+            const dataToAnalyze = useSessionGrouping ? groupBySession(callsData) : callsData;
+            
+            // Calculate overall metrics
+            const totalCalls = dataToAnalyze.length;
+            const answeredCalls = dataToAnalyze.filter(call => 
+                call.result === 'Accepted' || call.result === 'Call connected'
+            ).length;
+            const missedCalls = dataToAnalyze.filter(call => 
+                call.result === 'Missed' || call.result === 'No Answer'
+            ).length;
+            const voicemails = dataToAnalyze.filter(call => call.result === 'Voicemail').length;
+            const inboundCalls = dataToAnalyze.filter(call => call.direction === 'Inbound').length;
+            const outboundCalls = dataToAnalyze.filter(call => call.direction === 'Outbound').length;
 
             const answerRate = totalCalls > 0 ? ((answeredCalls / totalCalls) * 100).toFixed(1) : 0;
 
-            // Calculate average call duration (in seconds)
-            const callsWithDuration = callsData.filter(call => call.duration > 0);
-            const avgDuration = callsWithDuration.length > 0 
-                ? callsWithDuration.reduce((sum, call) => sum + call.duration, 0) / callsWithDuration.length 
+            // Calculate average call duration (in seconds) - only for answered calls
+            const answeredCallsWithDuration = dataToAnalyze.filter(call => 
+                (call.result === 'Accepted' || call.result === 'Call connected') && call.duration > 0
+            );
+            const avgDuration = answeredCallsWithDuration.length > 0 
+                ? answeredCallsWithDuration.reduce((sum, call) => sum + call.duration, 0) / answeredCallsWithDuration.length 
                 : 0;
 
             // Display KPIs
             const kpiContainer = document.getElementById('kpiContainer');
+            
+            let comparisonText = '';
+            if (useSessionGrouping) {
+                const rawCount = callsData.length;
+                const diff = rawCount - totalCalls;
+                comparisonText = `<div class="kpi-comparison">Session-grouped: Removed ${diff} duplicate call legs</div>`;
+            }
+            
             kpiContainer.innerHTML = `
                 <div class="kpi-card">
                     <div class="kpi-label">Total Calls</div>
                     <div class="kpi-value">${totalCalls.toLocaleString()}</div>
                     <div class="kpi-subtitle">${inboundCalls} inbound, ${outboundCalls} outbound</div>
+                    ${comparisonText}
                 </div>
 
                 <div class="kpi-card">
@@ -666,7 +880,7 @@
                 <div class="kpi-card">
                     <div class="kpi-label">Avg Call Duration</div>
                     <div class="kpi-value">${formatDuration(avgDuration)}</div>
-                    <div class="kpi-subtitle">${callsWithDuration.length} connected calls</div>
+                    <div class="kpi-subtitle">${answeredCallsWithDuration.length} connected calls</div>
                 </div>
 
                 <div class="kpi-card">
@@ -681,6 +895,8 @@
                     <div class="kpi-subtitle">${inboundCalls} inbound calls</div>
                 </div>
             `;
+            
+            updateWarningBox();
         }
 
         // Format duration in seconds to readable format
@@ -693,18 +909,70 @@
 
         // Render charts
         function renderCharts() {
+            const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
+            const dataToAnalyze = useSessionGrouping ? groupBySession(callsData) : callsData;
+            const groupBy = document.getElementById('groupBy').value;
+            
             // Destroy existing charts
             Object.values(charts).forEach(chart => chart?.destroy());
 
+            // Group calls by time period for answer rate calculation
+            const groupedCalls = groupCallsByTime(dataToAnalyze, groupBy);
+            
+            // Answer Rate Over Time chart
+            const answerRates = Object.values(groupedCalls).map(d => {
+                return d.total > 0 ? ((d.answered / d.total) * 100).toFixed(1) : 0;
+            });
+            
+            charts.answerRateChart = new Chart(document.getElementById('answerRateChart'), {
+                type: 'line',
+                data: {
+                    labels: Object.keys(groupedCalls),
+                    datasets: [{
+                        label: 'Answer Rate (%)',
+                        data: answerRates,
+                        borderColor: '#4caf50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        borderWidth: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: true },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Answer Rate: ' + context.parsed.y + '%';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
             // Calls over time chart
-            const dailyCalls = groupCallsByDay();
             charts.callsChart = new Chart(document.getElementById('callsChart'), {
                 type: 'line',
                 data: {
-                    labels: Object.keys(dailyCalls),
+                    labels: Object.keys(groupedCalls),
                     datasets: [{
                         label: 'Total Calls',
-                        data: Object.values(dailyCalls).map(d => d.total),
+                        data: Object.values(groupedCalls).map(d => d.total),
                         borderColor: '#667eea',
                         backgroundColor: 'rgba(102, 126, 234, 0.1)',
                         tension: 0.4,
@@ -721,10 +989,10 @@
             });
 
             // Distribution chart (answered vs missed)
-            const answered = callsData.filter(c => c.result === 'Accepted' || c.result === 'Call connected').length;
-            const missed = callsData.filter(c => c.result === 'Missed' || c.result === 'No Answer').length;
-            const voicemail = callsData.filter(c => c.result === 'Voicemail').length;
-            const other = callsData.length - answered - missed - voicemail;
+            const answered = dataToAnalyze.filter(c => c.result === 'Accepted' || c.result === 'Call connected').length;
+            const missed = dataToAnalyze.filter(c => c.result === 'Missed' || c.result === 'No Answer').length;
+            const voicemail = dataToAnalyze.filter(c => c.result === 'Voicemail').length;
+            const other = dataToAnalyze.length - answered - missed - voicemail;
 
             charts.distributionChart = new Chart(document.getElementById('distributionChart'), {
                 type: 'doughnut',
@@ -742,7 +1010,7 @@
             });
 
             // Hourly distribution
-            const hourlyData = groupCallsByHour();
+            const hourlyData = groupCallsByHour(dataToAnalyze);
             charts.hourlyChart = new Chart(document.getElementById('hourlyChart'), {
                 type: 'bar',
                 data: {
@@ -763,8 +1031,8 @@
             });
 
             // Call types
-            const inbound = callsData.filter(c => c.direction === 'Inbound').length;
-            const outbound = callsData.filter(c => c.direction === 'Outbound').length;
+            const inbound = dataToAnalyze.filter(c => c.direction === 'Inbound').length;
+            const outbound = dataToAnalyze.filter(c => c.direction === 'Outbound').length;
 
             charts.typeChart = new Chart(document.getElementById('typeChart'), {
                 type: 'pie',
@@ -782,38 +1050,54 @@
             });
         }
 
-        // Group calls by day
-        function groupCallsByDay() {
+        // Group calls by time period
+        function groupCallsByTime(calls, groupBy) {
             const grouped = {};
-            callsData.forEach(call => {
-                const date = new Date(call.startTime).toLocaleDateString();
-                if (!grouped[date]) {
-                    grouped[date] = { total: 0, answered: 0, missed: 0 };
+            
+            calls.forEach(call => {
+                let key;
+                const date = new Date(call.startTime);
+                
+                if (groupBy === 'day') {
+                    key = date.toLocaleDateString();
+                } else if (groupBy === 'week') {
+                    const weekStart = new Date(date);
+                    weekStart.setDate(date.getDate() - date.getDay());
+                    key = `Week of ${weekStart.toLocaleDateString()}`;
+                } else {
+                    key = date.toLocaleDateString();
                 }
-                grouped[date].total++;
+                
+                if (!grouped[key]) {
+                    grouped[key] = { total: 0, answered: 0, missed: 0 };
+                }
+                grouped[key].total++;
                 if (call.result === 'Accepted' || call.result === 'Call connected') {
-                    grouped[date].answered++;
+                    grouped[key].answered++;
                 } else if (call.result === 'Missed' || call.result === 'No Answer') {
-                    grouped[date].missed++;
+                    grouped[key].missed++;
                 }
             });
+            
             return grouped;
         }
 
         // Group calls by hour
-        function groupCallsByHour() {
+        function groupCallsByHour(calls) {
             const hours = new Array(24).fill(0);
-            callsData.forEach(call => {
+            calls.forEach(call => {
                 const hour = new Date(call.startTime).getHours();
                 hours[hour]++;
             });
             return hours;
         }
 
-        // Render call table
+        // Render call table with sorting
         function renderCallTable() {
             const tbody = document.getElementById('callTableBody');
-            const recentCalls = callsData.slice(0, 50); // Show last 50 calls
+            const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
+            const dataToShow = useSessionGrouping ? groupBySession(callsData) : callsData;
+            const recentCalls = dataToShow.slice(0, 100); // Show last 100 calls
 
             tbody.innerHTML = recentCalls.map(call => {
                 const date = new Date(call.startTime).toLocaleString();
@@ -825,15 +1109,67 @@
 
                 return `
                     <tr>
-                        <td>${date}</td>
+                        <td data-sort-value="${new Date(call.startTime).getTime()}">${date}</td>
                         <td>${call.direction || 'Unknown'}</td>
                         <td>${call.from?.phoneNumber || call.from?.name || 'Unknown'}</td>
                         <td>${call.to?.phoneNumber || call.to?.name || 'Unknown'}</td>
-                        <td>${duration}</td>
+                        <td data-sort-value="${call.duration || 0}">${duration}</td>
                         <td><span class="status-badge status-${statusClass}">${call.result || 'Unknown'}</span></td>
                     </tr>
                 `;
             }).join('');
+            
+            // Add sort event listeners
+            document.querySelectorAll('th.sortable').forEach(th => {
+                th.addEventListener('click', () => sortTable(th.dataset.sort));
+            });
+        }
+
+        // Sort table
+        function sortTable(column) {
+            const tbody = document.getElementById('callTableBody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            // Toggle sort direction
+            if (currentSortColumn === column) {
+                sortDirection[column] = sortDirection[column] === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortDirection[column] = 'asc';
+                currentSortColumn = column;
+            }
+            
+            const direction = sortDirection[column];
+            const columnIndex = Array.from(document.querySelectorAll('th')).findIndex(
+                th => th.dataset.sort === column
+            );
+            
+            rows.sort((a, b) => {
+                const aCell = a.children[columnIndex];
+                const bCell = b.children[columnIndex];
+                
+                let aValue = aCell.dataset.sortValue || aCell.textContent;
+                let bValue = bCell.dataset.sortValue || bCell.textContent;
+                
+                // Try to parse as numbers if possible
+                if (!isNaN(aValue) && !isNaN(bValue)) {
+                    aValue = parseFloat(aValue);
+                    bValue = parseFloat(bValue);
+                }
+                
+                if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+                if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+            
+            // Update table
+            rows.forEach(row => tbody.appendChild(row));
+            
+            // Update sort indicators
+            document.querySelectorAll('th').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+            });
+            const sortedTh = Array.from(document.querySelectorAll('th'))[columnIndex];
+            sortedTh.classList.add(direction === 'asc' ? 'sort-asc' : 'sort-desc');
         }
 
         // Utility functions
