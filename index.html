@@ -704,7 +704,7 @@
             }
         }
 
-        // Load call logs from RingCentral API - Account level, inbound only
+        // Load call logs from RingCentral API - Account level, inbound only, external callers only
         async function loadCallLogs(fromDate, toDate) {
             const from = new Date(fromDate).toISOString();
             const to = new Date(toDate + 'T23:59:59').toISOString();
@@ -729,9 +729,18 @@
                 }
 
                 const data = await response.json();
-                // Double-check: Filter to ensure only Inbound calls
-                const inboundOnly = (data.records || []).filter(call => call.direction === 'Inbound');
-                callsData = callsData.concat(inboundOnly);
+                
+                // Filter to:
+                // 1. Only Inbound calls
+                // 2. Exclude internal calls (where caller has an extensionId)
+                const externalInboundOnly = (data.records || []).filter(call => {
+                    const isInbound = call.direction === 'Inbound';
+                    const isExternal = !call.from?.extensionId; // External callers don't have extensionId
+                    const hasPhoneNumber = call.from?.phoneNumber && call.from.phoneNumber.length > 5;
+                    return isInbound && isExternal && hasPhoneNumber;
+                });
+                
+                callsData = callsData.concat(externalInboundOnly);
 
                 hasMore = data.navigation?.nextPage;
                 page++;
@@ -740,7 +749,7 @@
                 if (page > 10) break;
             }
             
-            console.log(`Loaded ${callsData.length} inbound calls`);
+            console.log(`Loaded ${callsData.length} external inbound patient calls`);
         }
 
         // Update warning box based on metrics mode
@@ -763,26 +772,16 @@
             const inboundCalls = calls.filter(call => call.direction === 'Inbound');
             const sessions = {};
             
+            console.log(`Grouping ${inboundCalls.length} inbound calls...`);
+            
             inboundCalls.forEach(call => {
-                // For call queues, group by sessionId + caller phone number + time window
-                // This handles cases where telephonySessionId might be missing or inconsistent
-                const sessionId = call.sessionId || call.telephonySessionId || call.id;
                 const callerPhone = call.from?.phoneNumber || 'unknown';
                 const callTime = new Date(call.startTime).getTime();
                 
-                // Create a composite key: sessionId-phoneNumber
-                // If no sessionId, group calls from same phone within 5 minutes
-                let compositeKey;
-                
-                if (sessionId && sessionId !== call.id) {
-                    // Has a valid session ID - group by session + caller
-                    compositeKey = `${sessionId}-${callerPhone}`;
-                } else {
-                    // No session ID - group by caller phone + 5-minute time window
-                    // This catches cases where the same patient calls and gets routed multiple times
-                    const timeWindow = Math.floor(callTime / (5 * 60 * 1000)); // 5-minute windows
-                    compositeKey = `${callerPhone}-${timeWindow}`;
-                }
+                // ALWAYS group by caller phone + 5-minute time window
+                // This is the most reliable way to identify unique patient call attempts
+                const timeWindow = Math.floor(callTime / (5 * 60 * 1000)); // 5-minute windows
+                const compositeKey = `${callerPhone}-${timeWindow}`;
                 
                 if (!sessions[compositeKey]) {
                     sessions[compositeKey] = [];
@@ -790,8 +789,12 @@
                 sessions[compositeKey].push(call);
             });
             
+            const grouped = Object.values(sessions);
+            const multiLeg = grouped.filter(s => s.length > 1).length;
+            console.log(`Grouped into ${grouped.length} unique calls (${multiLeg} with multiple legs)`);
+            
             // For each session group, determine the final outcome
-            return Object.values(sessions).map(sessionCalls => {
+            return grouped.map(sessionCalls => {
                 // Sort by start time to get chronological order
                 sessionCalls.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
                 
