@@ -758,25 +758,34 @@
             }
         }
 
-        // Group calls by telephony session ID
+        // Group calls by session using multiple identifiers for better accuracy
         function groupBySession(calls) {
             const sessions = {};
             
             calls.forEach(call => {
-                const sessionId = call.telephonySessionId;
+                // For call queues, group by sessionId + caller phone number + time window
+                // This handles cases where telephonySessionId might be missing or inconsistent
+                const sessionId = call.sessionId || call.telephonySessionId;
+                const callerPhone = call.from?.phoneNumber || 'unknown';
+                const callTime = new Date(call.startTime).getTime();
+                
+                // Create a composite key: sessionId-phoneNumber
+                // This groups all legs of the same call from the same caller
+                const compositeKey = `${sessionId}-${callerPhone}`;
+                
                 if (!sessionId) {
-                    // If no session ID, treat as unique call
+                    // If no session ID at all, treat as unique call
                     sessions[call.id] = [call];
                     return;
                 }
                 
-                if (!sessions[sessionId]) {
-                    sessions[sessionId] = [];
+                if (!sessions[compositeKey]) {
+                    sessions[compositeKey] = [];
                 }
-                sessions[sessionId].push(call);
+                sessions[compositeKey].push(call);
             });
             
-            // For each session, determine the final outcome
+            // For each session group, determine the final outcome
             return Object.values(sessions).map(sessionCalls => {
                 // Sort by start time to get chronological order
                 sessionCalls.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
@@ -791,10 +800,10 @@
                     ? sessionCalls.find(c => c.result === 'Accepted' || c.result === 'Call connected')
                     : sessionCalls[sessionCalls.length - 1];
                 
-                // Calculate total duration across all legs
-                const totalDuration = sessionCalls.reduce((sum, c) => sum + (c.duration || 0), 0);
+                // Calculate total duration across all legs (use max to avoid double-counting)
+                const maxDuration = Math.max(...sessionCalls.map(c => c.duration || 0));
                 
-                // Determine final result
+                // Determine final result based on priority: Answered > Voicemail > Missed
                 let finalResult = representativeCall.result;
                 if (hasAnswered) {
                     finalResult = 'Accepted';
@@ -807,9 +816,10 @@
                 return {
                     ...representativeCall,
                     result: finalResult,
-                    duration: Math.max(totalDuration, representativeCall.duration || 0),
+                    duration: maxDuration,
                     legs: sessionCalls,
-                    sessionId: sessionCalls[0].telephonySessionId
+                    sessionId: sessionCalls[0].sessionId || sessionCalls[0].telephonySessionId,
+                    legCount: sessionCalls.length
                 };
             });
         }
@@ -851,7 +861,9 @@
             if (useSessionGrouping) {
                 const rawCount = callsData.length;
                 const diff = rawCount - totalCalls;
-                comparisonText = `<div class="kpi-comparison">Session-grouped: Removed ${diff} duplicate call legs</div>`;
+                const groupedData = groupBySession(callsData);
+                const multiLegCalls = groupedData.filter(s => s.legCount && s.legCount > 1).length;
+                comparisonText = `<div class="kpi-comparison">Session-grouped: ${totalCalls} unique calls from ${rawCount} call records<br>${multiLegCalls} calls had multiple legs (queue/forward)</div>`;
             }
             
             kpiContainer.innerHTML = `
