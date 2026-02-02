@@ -530,21 +530,16 @@
                     <h3>🕐 Calls by Hour of Day</h3>
                     <canvas id="hourlyChart"></canvas>
                 </div>
-                <div class="chart-card">
-                    <h3>📞 Call Types Breakdown</h3>
-                    <canvas id="typeChart"></canvas>
-                </div>
             </div>
 
             <div class="call-table">
-                <h3>Recent Call Log (Click headers to sort)</h3>
+                <h3>Recent Patient Call Log (Click headers to sort)</h3>
                 <table id="callTable">
                     <thead>
                         <tr>
                             <th class="sortable" data-sort="startTime">Date/Time</th>
-                            <th class="sortable" data-sort="direction">Direction</th>
-                            <th class="sortable" data-sort="from">From</th>
-                            <th class="sortable" data-sort="to">To</th>
+                            <th class="sortable" data-sort="from">Patient Phone</th>
+                            <th class="sortable" data-sort="to">Answered By</th>
                             <th class="sortable" data-sort="duration">Duration</th>
                             <th class="sortable" data-sort="result">Status</th>
                         </tr>
@@ -709,7 +704,7 @@
             }
         }
 
-        // Load call logs from RingCentral API
+        // Load call logs from RingCentral API - Account level, inbound only
         async function loadCallLogs(fromDate, toDate) {
             const from = new Date(fromDate).toISOString();
             const to = new Date(toDate + 'T23:59:59').toISOString();
@@ -721,7 +716,7 @@
             while (hasMore) {
                 const response = await fetch(
                     `${RC_SERVER}/restapi/v1.0/account/~/call-log?` +
-                    `dateFrom=${from}&dateTo=${to}&page=${page}&perPage=1000&view=Detailed`,
+                    `dateFrom=${from}&dateTo=${to}&direction=Inbound&page=${page}&perPage=1000&view=Detailed`,
                     {
                         headers: {
                             'Authorization': `Bearer ${accessToken}`
@@ -832,7 +827,7 @@
             // Use session-based data if enabled
             const dataToAnalyze = useSessionGrouping ? groupBySession(callsData) : callsData;
             
-            // Calculate overall metrics
+            // All calls are inbound (patient calls)
             const totalCalls = dataToAnalyze.length;
             const answeredCalls = dataToAnalyze.filter(call => 
                 call.result === 'Accepted' || call.result === 'Call connected'
@@ -841,8 +836,6 @@
                 call.result === 'Missed' || call.result === 'No Answer'
             ).length;
             const voicemails = dataToAnalyze.filter(call => call.result === 'Voicemail').length;
-            const inboundCalls = dataToAnalyze.filter(call => call.direction === 'Inbound').length;
-            const outboundCalls = dataToAnalyze.filter(call => call.direction === 'Outbound').length;
 
             const answerRate = totalCalls > 0 ? ((answeredCalls / totalCalls) * 100).toFixed(1) : 0;
 
@@ -863,48 +856,50 @@
                 const diff = rawCount - totalCalls;
                 const groupedData = groupBySession(callsData);
                 const multiLegCalls = groupedData.filter(s => s.legCount && s.legCount > 1).length;
-                comparisonText = `<div class="kpi-comparison">Session-grouped: ${totalCalls} unique calls from ${rawCount} call records<br>${multiLegCalls} calls had multiple legs (queue/forward)</div>`;
+                comparisonText = `<div class="kpi-comparison">Session-grouped: ${totalCalls} unique patient calls from ${rawCount} call records<br>${multiLegCalls} calls routed through queue/forwarding</div>`;
             }
             
             kpiContainer.innerHTML = `
                 <div class="kpi-card">
-                    <div class="kpi-label">Total Calls</div>
+                    <div class="kpi-label">Total Patient Calls</div>
                     <div class="kpi-value">${totalCalls.toLocaleString()}</div>
-                    <div class="kpi-subtitle">${inboundCalls} inbound, ${outboundCalls} outbound</div>
+                    <div class="kpi-subtitle">Incoming calls only</div>
                     ${comparisonText}
                 </div>
 
                 <div class="kpi-card">
                     <div class="kpi-label">Answer Rate</div>
                     <div class="kpi-value">${answerRate}%</div>
-                    <div class="kpi-subtitle">${answeredCalls} of ${totalCalls} calls answered</div>
-                    ${answerRate >= 80 ? '<div class="kpi-trend positive">✓ Excellent</div>' : 
-                      answerRate >= 60 ? '<div class="kpi-trend">○ Good</div>' :
+                    <div class="kpi-subtitle">${answeredCalls} of ${totalCalls} patient calls answered</div>
+                    ${answerRate >= 90 ? '<div class="kpi-trend positive">✓ Excellent</div>' : 
+                      answerRate >= 80 ? '<div class="kpi-trend positive">✓ Good</div>' :
+                      answerRate >= 70 ? '<div class="kpi-trend">○ Fair</div>' :
                       '<div class="kpi-trend negative">↓ Needs Improvement</div>'}
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Missed Calls</div>
+                    <div class="kpi-label">Missed Patient Calls</div>
                     <div class="kpi-value">${missedCalls}</div>
-                    <div class="kpi-subtitle">${((missedCalls/totalCalls)*100).toFixed(1)}% of total calls</div>
+                    <div class="kpi-subtitle">${((missedCalls/totalCalls)*100).toFixed(1)}% missed</div>
+                    ${missedCalls === 0 ? '<div class="kpi-trend positive">✓ Perfect!</div>' : ''}
                 </div>
 
                 <div class="kpi-card">
                     <div class="kpi-label">Avg Call Duration</div>
                     <div class="kpi-value">${formatDuration(avgDuration)}</div>
-                    <div class="kpi-subtitle">${answeredCallsWithDuration.length} connected calls</div>
+                    <div class="kpi-subtitle">${answeredCallsWithDuration.length} answered calls</div>
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Voicemails</div>
+                    <div class="kpi-label">Went to Voicemail</div>
                     <div class="kpi-value">${voicemails}</div>
-                    <div class="kpi-subtitle">${((voicemails/totalCalls)*100).toFixed(1)}% of total calls</div>
+                    <div class="kpi-subtitle">${((voicemails/totalCalls)*100).toFixed(1)}% of patient calls</div>
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Inbound vs Outbound</div>
-                    <div class="kpi-value">${((inboundCalls/totalCalls)*100).toFixed(0)}%</div>
-                    <div class="kpi-subtitle">${inboundCalls} inbound calls</div>
+                    <div class="kpi-label">Patient Service Level</div>
+                    <div class="kpi-value">${(answeredCalls + voicemails > 0 ? (((answeredCalls + voicemails) / totalCalls) * 100).toFixed(1) : 0)}%</div>
+                    <div class="kpi-subtitle">Answered or captured in voicemail</div>
                 </div>
             `;
             
@@ -1041,25 +1036,6 @@
                     }
                 }
             });
-
-            // Call types
-            const inbound = dataToAnalyze.filter(c => c.direction === 'Inbound').length;
-            const outbound = dataToAnalyze.filter(c => c.direction === 'Outbound').length;
-
-            charts.typeChart = new Chart(document.getElementById('typeChart'), {
-                type: 'pie',
-                data: {
-                    labels: ['Inbound', 'Outbound'],
-                    datasets: [{
-                        data: [inbound, outbound],
-                        backgroundColor: ['#3498db', '#9b59b6']
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true
-                }
-            });
         }
 
         // Group calls by time period
@@ -1122,9 +1098,8 @@
                 return `
                     <tr>
                         <td data-sort-value="${new Date(call.startTime).getTime()}">${date}</td>
-                        <td>${call.direction || 'Unknown'}</td>
-                        <td>${call.from?.phoneNumber || call.from?.name || 'Unknown'}</td>
-                        <td>${call.to?.phoneNumber || call.to?.name || 'Unknown'}</td>
+                        <td>${call.from?.phoneNumber || call.from?.name || 'Unknown Patient'}</td>
+                        <td>${call.to?.name || call.to?.phoneNumber || call.to?.extensionNumber || 'Office'}</td>
                         <td data-sort-value="${call.duration || 0}">${duration}</td>
                         <td><span class="status-badge status-${statusClass}">${call.result || 'Unknown'}</span></td>
                     </tr>
