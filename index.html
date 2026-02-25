@@ -581,8 +581,8 @@
 
             <!-- Version Footer -->
             <div style="text-align: center; padding: 20px; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; margin-top: 40px; background: #f9f9f9;">
-                <strong>Dashboard Version:</strong> v3.1.0 - CMD Date Filtering + Manual Load<br>
-                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-cmd-datefilter | Last Updated: Feb 2, 2026 11:15 AM EST</span>
+                <strong>Dashboard Version:</strong> v4.0.0 - Simplified Metrics + Agent Names<br>
+                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-v4-simplified | Last Updated: Feb 2, 2026 12:45 PM EST</span>
             </div>
         </div>
     </div>
@@ -600,6 +600,43 @@
             extensions: ["34215","54708","44226","42356","34210","54703","44234","44206","34214","44237","44401","44222","44230","77704","44229","44236","44200","42771","77702","42407","52770","34213","44930","54702","54705","44232","54706","47777","44233","54711","44215","54710","59633"],
             directNumbers: ["+15613224215","+15612274708","+15617454226","+15615102356","+15613224210","+15612274703","+15617454234","+15617454206","+15613224214","+15617454237","+15617454222","+15617454230","+15612274701","+15617454229","+15617454236","+15617454200","+15615102771","+15612274702","+15615102407","+15612274706","+15612274705","+15613224213","+15617454930","+15617194717","+15615102770","+15617454232","+15612274704","+15617454777","+15617454233","+15617410000","+15613938555","+15612274710"],
             mobileNumbers: ["+15614601378","+15614945111","+15613890981","+15617194717","+15612152981","+15613007476","+15615919551","+15615078989"]
+        };
+
+        // Staff name mapping (extension to name)
+        const STAFF_NAMES = {
+            "34215": "ARNP Line Boca Raton",
+            "54708": "Amber Opsincs",
+            "44226": "Analy Arrieta",
+            "42356": "Bethany Lacroix",
+            "34210": "Boca FrtDsk A",
+            "54703": "COVID Sick Line",
+            "44234": "Cheyenne Ophilus",
+            "44206": "Deanna Gonzalez",
+            "34214": "Doctor's Line Boca Raton",
+            "44237": "Esbeydi Espindola",
+            "44401": "Future Appointments",
+            "44222": "Gardens Conference Room",
+            "44230": "Insurance & Billing Jupiter",
+            "77704": "Judy Rich",
+            "44229": "Jup Provider",
+            "44236": "Katrina Wilson",
+            "44200": "Kristen Tamburro",
+            "42771": "Laurie Vincent",
+            "77702": "Main Call Center",
+            "42407": "Marianne Gittelmacher",
+            "52770": "Martha Sutterfield",
+            "34213": "On-Call Physician",
+            "44930": "On-Call Physician",
+            "54702": "PBG FD-Main",
+            "54705": "PBG Nurses Station",
+            "44232": "PBG-FD 2ND DESK",
+            "54706": "Paola Herrera",
+            "47777": "PedPart Main",
+            "44233": "Practice Admin",
+            "54711": "Providers Lounge PBG",
+            "44215": "Ruthie Bunkelmann",
+            "54710": "Sue Davenport",
+            "59633": "Tommy Schechtman"
         };
 
         let accessToken = null;
@@ -1196,7 +1233,8 @@
             }
 
             const staffAnswerRate = totalCalls > 0 ? ((staffAnswered / totalCalls) * 100).toFixed(1) : 0;
-            const cmdRate = totalCalls > 0 ? ((wentToCMDAfterRing / totalCalls) * 100).toFixed(1) : 0;
+            const totalMissed = totalCalls - staffAnswered;
+            const missedRate = totalCalls > 0 ? ((totalMissed / totalCalls) * 100).toFixed(1) : 0;
 
             // Calculate average call duration (in seconds) - only for staff-answered calls
             const staffAnsweredWithDuration = callsWithCMDInfo.filter(call => 
@@ -1223,7 +1261,7 @@
                 const totalCMD = cmdData.length;
                 const filteredCMD = filteredCMDData.length;
                 cmdStatus = `<div class="kpi-comparison" style="background: #e3f2fd; border-left: 4px solid #2196f3;">
-                    📊 CallMyDoc: ${filteredCMD} records in date range (${totalCMD} total in file) | ${matchedCount} matched with RingCentral | ${directToCMD} went direct to CMD
+                    📊 CallMyDoc: ${filteredCMD} records in date range (${totalCMD} total in file) | ${matchedCount} matched with RingCentral
                 </div>`;
             }
             
@@ -1232,7 +1270,7 @@
                 ${cmdStatus}
                 
                 <div class="kpi-card">
-                    <div class="kpi-label">Total Patient Calls</div>
+                    <div class="kpi-label">Total Unique Inbound Calls</div>
                     <div class="kpi-value">${totalCalls.toLocaleString()}</div>
                     <div class="kpi-subtitle">${selectedDepartment !== 'all' ? selectedDepartment.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) + ' department' : 'All departments'}</div>
                 </div>
@@ -1248,33 +1286,32 @@
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">CallMyDoc (After Ring)</div>
+                    <div class="kpi-label">Total Missed Calls</div>
+                    <div class="kpi-value">${totalMissed}</div>
+                    <div class="kpi-subtitle">${missedRate}% not answered by staff</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-label">Missed: CallMyDoc</div>
                     <div class="kpi-value">${wentToCMDAfterRing}</div>
-                    <div class="kpi-subtitle">${cmdRate}% went to CMD after ringing staff</div>
+                    <div class="kpi-subtitle">${((wentToCMDAfterRing/totalCalls)*100).toFixed(1)}% forwarded to CMD</div>
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Other External Forward</div>
+                    <div class="kpi-label">Missed: Other External</div>
                     <div class="kpi-value">${forwardedExternalNonCMD}</div>
-                    <div class="kpi-subtitle">${((forwardedExternalNonCMD/totalCalls)*100).toFixed(1)}% forwarded to other external</div>
+                    <div class="kpi-subtitle">${((forwardedExternalNonCMD/totalCalls)*100).toFixed(1)}% forwarded to doctors/external</div>
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Missed by Staff</div>
-                    <div class="kpi-value">${missedCalls}</div>
-                    <div class="kpi-subtitle">${((missedCalls/totalCalls)*100).toFixed(1)}% not answered at all</div>
-                    ${missedCalls === 0 ? '<div class="kpi-trend positive">✓ Perfect!</div>' : ''}
-                </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Avg Staff Call Duration</div>
-                    <div class="kpi-value">${formatDuration(avgDuration)}</div>
-                    <div class="kpi-subtitle">${staffAnsweredWithDuration.length} staff-answered calls</div>
+                    <div class="kpi-label">Missed: No Answer/VM</div>
+                    <div class="kpi-value">${missedCalls + voicemails}</div>
+                    <div class="kpi-subtitle">${(((missedCalls + voicemails)/totalCalls)*100).toFixed(1)}% no answer or voicemail</div>
                 </div>
             `;
             
             // Add department breakdown if CMD data is loaded and no department filter
-            if (cmdData.length > 0 && selectedDepartment === 'all') {
+            if (filteredCMDData.length > 0 && selectedDepartment === 'all') {
                 renderDepartmentBreakdown(callsWithCMDInfo);
             }
             
@@ -1341,7 +1378,7 @@
             calls.forEach(call => {
                 if (isAnsweredByStaff(call)) {
                     const ext = call.to?.extensionNumber || 'Unknown';
-                    const name = call.to?.name || `Ext ${ext}`;
+                    const name = STAFF_NAMES[ext] || call.to?.name || `Ext ${ext}`;
                     
                     if (!agentStats[ext]) {
                         agentStats[ext] = {
