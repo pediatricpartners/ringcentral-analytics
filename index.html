@@ -503,6 +503,7 @@
                         </select>
                     </div>
                     <button class="btn" onclick="refreshData()">Update Dashboard</button>
+                    <button class="btn" onclick="exportCallsToCSV()" style="background: #4caf50; margin-left: 10px;">📥 Export Calls to CSV</button>
                 </div>
                 
                 <div style="margin-top: 15px; padding: 15px; background: #f0f8ff; border: 2px dashed #2196f3; border-radius: 8px;">
@@ -1281,6 +1282,15 @@
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end
             return diffDays;
         }
+        
+        // Format duration in seconds to readable format
+        function formatDuration(seconds) {
+            if (seconds < 60) return `${Math.round(seconds)}s`;
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.round(seconds % 60);
+            return `${minutes}m ${secs}s`;
+        }
+
         // Render department breakdown cards
         function renderDepartmentBreakdown(calls) {
             const departments = ['Call Center', 'Triage', 'Billing & Insurance', 'Referrals'];
@@ -1761,6 +1771,90 @@
         }
 
         // Check if already authenticated
+        // Export calls to CSV
+        function exportCallsToCSV() {
+            if (callsData.length === 0) {
+                alert('No data to export. Please load data first by clicking "Update Dashboard".');
+                return;
+            }
+            
+            const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
+            const selectedQueue = document.getElementById('queueFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            
+            // Get CMD data filtered by selected date range
+            const filteredCMDData = getFilteredCMDData(fromDate, toDate);
+            
+            // Filter to inbound only
+            let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
+            
+            // Filter by call queue if selected
+            if (selectedQueue !== 'all') {
+                inboundOnly = inboundOnly.filter(call => {
+                    return call.to?.extensionNumber === selectedQueue ||
+                           (call.legs && call.legs.some(leg => leg.to?.extensionNumber === selectedQueue));
+                });
+            }
+            
+            // Use session-based data if enabled
+            const dataToExport = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
+            
+            // Match with CMD data
+            const callsWithCMDInfo = dataToExport.map(call => {
+                const cmdMatch = matchWithCMD(call, filteredCMDData);
+                return {
+                    ...call,
+                    cmdMatch: cmdMatch,
+                    department: cmdMatch ? cmdMatch.department : 'Unknown',
+                    wentToCMD: !!cmdMatch
+                };
+            });
+            
+            // Filter by department if selected
+            let finalData = callsWithCMDInfo;
+            if (filteredCMDData.length > 0 && selectedDepartment !== 'all') {
+                const deptMap = {
+                    'call-center': 'Call Center',
+                    'triage': 'Triage',
+                    'billing': 'Billing & Insurance',
+                    'referrals': 'Referrals'
+                };
+                const deptName = deptMap[selectedDepartment];
+                finalData = callsWithCMDInfo.filter(call => call.department === deptName);
+            }
+            
+            // Create CSV content
+            let csv = 'Date,Time,Caller Phone,Caller Name,Answered By (Extension),Answered By (Name),Duration (seconds),Result,Department,Went to CMD\n';
+            
+            finalData.forEach(call => {
+                const date = new Date(call.startTime).toLocaleDateString();
+                const time = new Date(call.startTime).toLocaleTimeString();
+                const callerPhone = call.from?.phoneNumber || '';
+                const callerName = call.from?.name || '';
+                const answeredExt = call.to?.extensionNumber || '';
+                const answeredName = STAFF_NAMES[answeredExt] || call.to?.name || '';
+                const duration = call.duration || 0;
+                const result = call.result || '';
+                const department = call.department || '';
+                const wentToCMD = call.wentToCMD ? 'Yes' : 'No';
+                
+                csv += `"${date}","${time}","${callerPhone}","${callerName}","${answeredExt}","${answeredName}",${duration},"${result}","${department}","${wentToCMD}"\n`;
+            });
+            
+            // Download CSV
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `ringcentral_calls_${fromDate}_to_${toDate}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
         window.onload = function() {
             accessToken = sessionStorage.getItem('rc_access_token');
             
