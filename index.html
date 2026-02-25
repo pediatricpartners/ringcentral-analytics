@@ -581,8 +581,8 @@
 
             <!-- Version Footer -->
             <div style="text-align: center; padding: 20px; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; margin-top: 40px; background: #f9f9f9;">
-                <strong>Dashboard Version:</strong> v4.0.0 - Simplified Metrics + Agent Names<br>
-                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-v4-simplified | Last Updated: Feb 2, 2026 12:45 PM EST</span>
+                <strong>Dashboard Version:</strong> v5.0 - Clean Metrics (Calls/Day, % Team, Duration)<br>
+                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-v5-final | Last Updated: Feb 2, 2026 1:15 PM EST</span>
             </div>
         </div>
     </div>
@@ -1152,7 +1152,7 @@
             });
         }
 
-        // Calculate KPIs with CallMyDoc integration and department breakdown
+        // Calculate KPIs with CallMyDoc integration - v5.0 Clean
         function calculateKPIs() {
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const groupBy = document.getElementById('groupBy').value;
@@ -1178,7 +1178,7 @@
             // Use session-based data if enabled
             const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             
-            // Match with CallMyDoc data and categorize (using filtered CMD data)
+            // Match with CallMyDoc data
             let callsWithCMDInfo = dataToAnalyze.map(call => {
                 const cmdMatch = matchWithCMD(call, filteredCMDData);
                 return {
@@ -1191,6 +1191,96 @@
             
             // Filter by department if selected
             if (filteredCMDData.length > 0 && selectedDepartment !== 'all') {
+                const deptMap = {
+                    'call-center': 'Call Center',
+                    'triage': 'Triage',
+                    'billing': 'Billing & Insurance',
+                    'referrals': 'Referrals'
+                };
+                const deptName = deptMap[selectedDepartment];
+                callsWithCMDInfo = callsWithCMDInfo.filter(call => call.department === deptName);
+            }
+            
+            const totalCalls = callsWithCMDInfo.length;
+            const wentToCMD = callsWithCMDInfo.filter(call => call.wentToCMD).length;
+            const trueStaffAnswered = totalCalls - wentToCMD;
+            const trueAnswerRate = totalCalls > 0 ? ((trueStaffAnswered / totalCalls) * 100).toFixed(1) : 0;
+
+            // Display KPIs
+            const kpiContainer = document.getElementById('kpiContainer');
+            
+            let comparisonText = '';
+            if (useSessionGrouping) {
+                const rawCount = inboundOnly.length;
+                const multiLegCalls = groupBySession(inboundOnly).filter(s => s.legCount && s.legCount > 1).length;
+                comparisonText = `<div class="kpi-comparison">Session-grouped: ${totalCalls} unique patient calls from ${rawCount} call records<br>${multiLegCalls} calls routed through queue/forwarding</div>`;
+            }
+            
+            // Build CMD integration status
+            let cmdStatus = '';
+            if (cmdData.length > 0) {
+                const totalCMD = cmdData.length;
+                const filteredCMD = filteredCMDData.length;
+                cmdStatus = `<div class="kpi-comparison" style="background: #e3f2fd; border-left: 4px solid #2196f3;">
+                    📊 CallMyDoc: ${filteredCMD} records in date range (${totalCMD} total in file) | ${wentToCMD} matched with RingCentral
+                </div>`;
+            }
+            
+            kpiContainer.innerHTML = `
+                ${comparisonText}
+                ${cmdStatus}
+                
+                <div class="kpi-card">
+                    <div class="kpi-label">Total Unique Inbound Calls</div>
+                    <div class="kpi-value">${totalCalls.toLocaleString()}</div>
+                    <div class="kpi-subtitle">${selectedDepartment !== 'all' ? selectedDepartment.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) + ' department' : 'All departments'}</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-label">True Staff Answer Rate</div>
+                    <div class="kpi-value">${trueAnswerRate}%</div>
+                    <div class="kpi-subtitle">${trueStaffAnswered.toLocaleString()} answered by staff</div>
+                    ${trueAnswerRate >= 95 ? '<div class="kpi-trend positive">✓ Excellent</div>' : 
+                      trueAnswerRate >= 90 ? '<div class="kpi-trend positive">✓ Good</div>' :
+                      trueAnswerRate >= 85 ? '<div class="kpi-trend">○ Fair</div>' :
+                      '<div class="kpi-trend negative">↓ Needs Improvement</div>'}
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-label">Calls Answered by Staff</div>
+                    <div class="kpi-value">${trueStaffAnswered.toLocaleString()}</div>
+                    <div class="kpi-subtitle">Staff picked up before forwarding</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-label">Calls to CallMyDoc</div>
+                    <div class="kpi-value">${wentToCMD}</div>
+                    <div class="kpi-subtitle">${((wentToCMD/totalCalls)*100).toFixed(1)}% forwarded (staff missed)</div>
+                </div>
+            `;
+            
+            // Add department breakdown if CMD data is loaded and no department filter
+            if (filteredCMDData.length > 0 && selectedDepartment === 'all') {
+                renderDepartmentBreakdown(callsWithCMDInfo);
+            }
+            
+            // Add per-agent performance table
+            if (trueStaffAnswered > 0) {
+                const days = calculateDaysInRange(fromDate, toDate);
+                renderAgentPerformance(callsWithCMDInfo, trueStaffAnswered, days);
+            }
+            
+            updateWarningBox();
+        }
+        
+        // Calculate number of days in date range
+        function calculateDaysInRange(fromDate, toDate) {
+            const from = new Date(fromDate);
+            const to = new Date(toDate);
+            const diffTime = Math.abs(to - from);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end
+            return diffDays;
+        }
                 const deptMap = {
                     'call-center': 'Call Center',
                     'triage': 'Triage',
@@ -1338,11 +1428,12 @@
             
             departments.forEach(dept => {
                 const deptCalls = calls.filter(c => c.department === dept);
-                const staffAnswered = deptCalls.filter(c => isAnsweredByStaff(c)).length;
                 const total = deptCalls.length;
-                const answerRate = total > 0 ? ((staffAnswered / total) * 100).toFixed(1) : 0;
+                const wentToCMD = deptCalls.filter(c => c.wentToCMD).length;
+                const trueStaffAnswered = total - wentToCMD;
+                const answerRate = total > 0 ? ((trueStaffAnswered / total) * 100).toFixed(1) : 0;
                 
-                deptStats[dept] = { total, staffAnswered, answerRate };
+                deptStats[dept] = { total, trueStaffAnswered, answerRate };
             });
             
             const kpiContainer = document.getElementById('kpiContainer');
@@ -1358,7 +1449,7 @@
                                     <div class="kpi-label" style="color: rgba(255,255,255,0.9);">${dept}</div>
                                     <div class="kpi-value">${stats.answerRate}%</div>
                                     <div class="kpi-subtitle" style="color: rgba(255,255,255,0.8);">
-                                        ${stats.staffAnswered}/${stats.total} calls answered
+                                        ${stats.trueStaffAnswered}/${stats.total} answered by staff
                                     </div>
                                 </div>
                             `;
@@ -1370,13 +1461,14 @@
             kpiContainer.innerHTML += deptHTML;
         }
 
-        // Render per-agent performance table
-        function renderAgentPerformance(calls) {
-            // Group calls by agent (answered by extension)
+        // Render per-agent performance table - v5.0
+        function renderAgentPerformance(calls, totalStaffAnswered, daysInRange) {
+            // Group calls by agent (who actually answered)
             const agentStats = {};
             
             calls.forEach(call => {
-                if (isAnsweredByStaff(call)) {
+                // Only count if staff actually answered (not CMD)
+                if (!call.wentToCMD && isAnsweredByStaff(call)) {
                     const ext = call.to?.extensionNumber || 'Unknown';
                     const name = STAFF_NAMES[ext] || call.to?.name || `Ext ${ext}`;
                     
@@ -1385,42 +1477,35 @@
                             name,
                             extension: ext,
                             answered: 0,
-                            total: 0,
-                            department: call.department || 'Unknown'
+                            totalDuration: 0,
+                            callDurations: []
                         };
                     }
                     agentStats[ext].answered++;
-                    agentStats[ext].total++;
-                }
-            });
-            
-            // Also count calls that rang but weren't answered by calculating from all staff calls
-            const staffExtensions = new Set(STAFF_WHITELIST.extensions);
-            calls.forEach(call => {
-                const targetExt = call.to?.extensionNumber;
-                if (targetExt && staffExtensions.has(targetExt)) {
-                    if (!agentStats[targetExt]) {
-                        agentStats[targetExt] = {
-                            name: call.to?.name || `Ext ${targetExt}`,
-                            extension: targetExt,
-                            answered: 0,
-                            total: 0,
-                            department: call.department || 'Unknown'
-                        };
-                    }
-                    if (!isAnsweredByStaff(call)) {
-                        agentStats[targetExt].total++;
+                    if (call.duration) {
+                        agentStats[ext].totalDuration += call.duration;
+                        agentStats[ext].callDurations.push(call.duration);
                     }
                 }
             });
             
             const agents = Object.values(agentStats)
-                .filter(a => a.total > 0 || a.answered > 0)
-                .sort((a, b) => {
-                    const rateA = a.total > 0 ? (a.answered / a.total) : 0;
-                    const rateB = b.total > 0 ? (b.answered / b.total) : 0;
-                    return rateB - rateA;
-                });
+                .filter(a => a.answered > 0)
+                .map(agent => {
+                    const callsPerDay = daysInRange > 0 ? (agent.answered / daysInRange).toFixed(1) : 0;
+                    const percentOfTeam = totalStaffAnswered > 0 ? ((agent.answered / totalStaffAnswered) * 100).toFixed(1) : 0;
+                    const avgDuration = agent.callDurations.length > 0 
+                        ? agent.totalDuration / agent.callDurations.length 
+                        : 0;
+                    
+                    return {
+                        ...agent,
+                        callsPerDay,
+                        percentOfTeam,
+                        avgDuration
+                    };
+                })
+                .sort((a, b) => b.answered - a.answered); // Sort by calls answered (descending)
             
             if (agents.length === 0) return;
             
@@ -1432,31 +1517,25 @@
                         <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px;">
                             <thead>
                                 <tr style="background: #667eea; color: white;">
-                                    <th style="padding: 12px; text-align: left;">Agent</th>
+                                    <th style="padding: 12px; text-align: left;">Agent Name</th>
                                     <th style="padding: 12px; text-align: left;">Extension</th>
-                                    <th style="padding: 12px; text-align: left;">Department</th>
                                     <th style="padding: 12px; text-align: center;">Calls Answered</th>
-                                    <th style="padding: 12px; text-align: center;">Total Calls</th>
-                                    <th style="padding: 12px; text-align: center;">Answer Rate</th>
+                                    <th style="padding: 12px; text-align: center;">Calls/Day</th>
+                                    <th style="padding: 12px; text-align: center;">% of Team</th>
+                                    <th style="padding: 12px; text-align: center;">Avg Duration</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${agents.map((agent, i) => {
-                                    const rate = agent.total > 0 ? ((agent.answered / agent.total) * 100).toFixed(1) : 0;
-                                    const rateColor = rate >= 90 ? '#4caf50' : rate >= 80 ? '#ff9800' : '#e74c3c';
                                     const bgColor = i % 2 === 0 ? '#f9f9f9' : 'white';
                                     return `
                                         <tr style="background: ${bgColor}; border-bottom: 1px solid #e0e0e0;">
                                             <td style="padding: 12px;"><strong>${agent.name}</strong></td>
                                             <td style="padding: 12px;">${agent.extension}</td>
-                                            <td style="padding: 12px;">${agent.department}</td>
                                             <td style="padding: 12px; text-align: center;"><strong>${agent.answered}</strong></td>
-                                            <td style="padding: 12px; text-align: center;">${agent.total}</td>
-                                            <td style="padding: 12px; text-align: center;">
-                                                <span style="background: ${rateColor}; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 13px;">
-                                                    ${rate}%
-                                                </span>
-                                            </td>
+                                            <td style="padding: 12px; text-align: center;">${agent.callsPerDay}</td>
+                                            <td style="padding: 12px; text-align: center;">${agent.percentOfTeam}%</td>
+                                            <td style="padding: 12px; text-align: center;">${formatDuration(agent.avgDuration)}</td>
                                         </tr>
                                     `;
                                 }).join('')}
