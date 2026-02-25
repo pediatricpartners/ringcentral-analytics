@@ -492,7 +492,31 @@
                             <!-- Queues populated dynamically -->
                         </select>
                     </div>
+                    <div class="input-group">
+                        <label>Department</label>
+                        <select id="departmentFilter">
+                            <option value="all">All Departments</option>
+                            <option value="call-center">Call Center</option>
+                            <option value="triage">Triage</option>
+                            <option value="billing">Billing & Insurance</option>
+                            <option value="referrals">Referrals</option>
+                        </select>
+                    </div>
                     <button class="btn" onclick="refreshData()">Update Dashboard</button>
+                </div>
+                
+                <div style="margin-top: 15px; padding: 15px; background: #f0f8ff; border: 2px dashed #2196f3; border-radius: 8px;">
+                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 300px;">
+                            <strong>📊 CallMyDoc Data Integration</strong>
+                            <p style="margin: 5px 0; font-size: 13px; color: #666;">Upload CSV to see department-level performance & true staff answer rates</p>
+                        </div>
+                        <input type="file" id="cmdFileInput" accept=".csv" style="display: none;">
+                        <button class="btn" onclick="document.getElementById('cmdFileInput').click()" style="background: #2196f3;">
+                            📤 Upload CallMyDoc CSV
+                        </button>
+                    </div>
+                    <div id="cmdStatus" style="margin-top: 10px; font-size: 12px;"></div>
                 </div>
                 
                 <div class="metrics-toggle">
@@ -557,8 +581,8 @@
 
             <!-- Version Footer -->
             <div style="text-align: center; padding: 20px; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; margin-top: 40px; background: #f9f9f9;">
-                <strong>Dashboard Version:</strong> v2.1.0 - Call Queue Filtering<br>
-                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-queuefilter | Last Updated: Feb 2, 2026 9:00 AM EST</span>
+                <strong>Dashboard Version:</strong> v3.0.0 - CallMyDoc Integration + Department Analytics<br>
+                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-cmd-departments | Last Updated: Feb 2, 2026 10:30 AM EST</span>
             </div>
         </div>
     </div>
@@ -581,6 +605,7 @@
         let accessToken = null;
         let callsData = [];
         let callQueues = [];
+        let cmdData = []; // CallMyDoc data
         let charts = {};
         let sortDirection = {};
         let currentSortColumn = null;
@@ -756,6 +781,148 @@
             }
         }
 
+        // ========== CallMyDoc Integration ==========
+        
+        // Map CallMyDoc dashboard names to departments
+        function mapCMDDepartment(dashboardName) {
+            if (!dashboardName) return 'Unknown';
+            const lower = dashboardName.toLowerCase();
+            if (lower.includes('referral')) return 'Referrals';
+            if (lower.includes('billing') || lower.includes('insurance')) return 'Billing & Insurance';
+            if (lower.includes('triage')) return 'Triage';
+            if (lower.includes('call center') || lower.includes('appointments')) return 'Call Center';
+            return 'Other';
+        }
+
+        // Handle CallMyDoc CSV upload
+        window.handleCMDUpload = function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    parseCMDData(e.target.result);
+                } catch (error) {
+                    document.getElementById('cmdStatus').innerHTML = 
+                        `<span style="color: #e74c3c;">❌ Error parsing CSV: ${error.message}</span>`;
+                }
+            };
+            reader.readAsText(file);
+        };
+
+        // Parse CallMyDoc CSV data
+        function parseCMDData(csvText) {
+            const lines = csvText.split('\n');
+            const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+            
+            cmdData = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                
+                // Parse CSV line (handling quoted fields)
+                const values = [];
+                let currentValue = '';
+                let inQuotes = false;
+                
+                for (let char of lines[i]) {
+                    if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        values.push(currentValue.trim());
+                        currentValue = '';
+                    } else {
+                        currentValue += char;
+                    }
+                }
+                values.push(currentValue.trim());
+                
+                if (values.length < headers.length) continue;
+                
+                const record = {};
+                headers.forEach((header, index) => {
+                    record[header] = values[index] || '';
+                });
+                
+                // Extract and parse relevant fields
+                const dashboardName = record['Dashboard Name'] || '';
+                const date = record['Date'] || '';
+                const time = record['Time'] || '';
+                const fromPhone = (record['From Phone'] || '').replace(/[^0-9]/g, '');
+                
+                if (fromPhone && date && time) {
+                    cmdData.push({
+                        dashboardName,
+                        department: mapCMDDepartment(dashboardName),
+                        date,
+                        time,
+                        fromPhone: '+1' + fromPhone,
+                        timestamp: parseDateTime(date, time),
+                        raw: record
+                    });
+                }
+            }
+            
+            document.getElementById('cmdStatus').innerHTML = 
+                `<span style="color: #4caf50;">✅ Loaded ${cmdData.length} CallMyDoc records</span>`;
+            
+            // Recalculate metrics with CMD data
+            if (callsData.length > 0) {
+                calculateKPIs();
+                renderCharts();
+                renderCallTable();
+            }
+        }
+
+        // Parse date/time from CallMyDoc format
+        function parseDateTime(date, time) {
+            // date format: "01/31/2026"
+            // time format: "9:32 AM"
+            try {
+                const [month, day, year] = date.split('/');
+                const timeParts = time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+                if (!timeParts) return null;
+                
+                let hours = parseInt(timeParts[1]);
+                const minutes = parseInt(timeParts[2]);
+                const ampm = timeParts[3].toUpperCase();
+                
+                if (ampm === 'PM' && hours !== 12) hours += 12;
+                if (ampm === 'AM' && hours === 12) hours = 0;
+                
+                return new Date(year, month - 1, day, hours, minutes).getTime();
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // Match RingCentral calls with CallMyDoc calls
+        function matchWithCMD(rcCall) {
+            if (cmdData.length === 0) return null;
+            
+            const rcPhone = rcCall.from?.phoneNumber;
+            const rcTime = new Date(rcCall.startTime).getTime();
+            
+            if (!rcPhone || !rcTime) return null;
+            
+            // Find CMD call within 2-minute window
+            const twoMinutes = 2 * 60 * 1000;
+            
+            for (const cmdCall of cmdData) {
+                if (cmdCall.fromPhone === rcPhone) {
+                    const timeDiff = Math.abs(cmdCall.timestamp - rcTime);
+                    if (timeDiff <= twoMinutes) {
+                        return cmdCall;
+                    }
+                }
+            }
+            
+            return null;
+        }
+
+        // Refresh data
+
         // Load call queues from RingCentral API
         async function loadCallQueues() {
             try {
@@ -922,11 +1089,12 @@
             });
         }
 
-        // Calculate KPIs
+        // Calculate KPIs with CallMyDoc integration and department breakdown
         function calculateKPIs() {
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const groupBy = document.getElementById('groupBy').value;
             const selectedQueue = document.getElementById('queueFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
             
             // Filter to inbound only (patient calls)
             let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
@@ -934,10 +1102,7 @@
             // Filter by call queue if selected
             if (selectedQueue !== 'all') {
                 inboundOnly = inboundOnly.filter(call => {
-                    // Check if call went through the selected queue
-                    // Queue extension number is in the 'to' field for calls to that queue
                     return call.to?.extensionNumber === selectedQueue ||
-                           // Also check if any leg went through the queue
                            (call.legs && call.legs.some(leg => leg.to?.extensionNumber === selectedQueue));
                 });
             }
@@ -945,25 +1110,65 @@
             // Use session-based data if enabled
             const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             
-            // All calls are inbound (patient calls)
-            const totalCalls = dataToAnalyze.length;
+            // Match with CallMyDoc data and categorize
+            let callsWithCMDInfo = dataToAnalyze.map(call => {
+                const cmdMatch = matchWithCMD(call);
+                return {
+                    ...call,
+                    cmdMatch: cmdMatch,
+                    department: cmdMatch ? cmdMatch.department : 'Unknown',
+                    wentToCMD: !!cmdMatch
+                };
+            });
             
-            // NEW: Separate staff-answered from externally forwarded
-            const staffAnswered = dataToAnalyze.filter(call => isAnsweredByStaff(call)).length;
-            const forwardedExternal = dataToAnalyze.filter(call => 
-                (call.result === 'Accepted' || call.result === 'Call connected') && !isAnsweredByStaff(call)
+            // Filter by department if selected
+            if (cmdData.length > 0 && selectedDepartment !== 'all') {
+                const deptMap = {
+                    'call-center': 'Call Center',
+                    'triage': 'Triage',
+                    'billing': 'Billing & Insurance',
+                    'referrals': 'Referrals'
+                };
+                const deptName = deptMap[selectedDepartment];
+                callsWithCMDInfo = callsWithCMDInfo.filter(call => call.department === deptName);
+            }
+            
+            const totalCalls = callsWithCMDInfo.length;
+            
+            // Calculate metrics with CMD consideration
+            const staffAnswered = callsWithCMDInfo.filter(call => isAnsweredByStaff(call)).length;
+            const wentToCMDAfterRing = callsWithCMDInfo.filter(call => 
+                call.wentToCMD && !isAnsweredByStaff(call)
             ).length;
-            const missedCalls = dataToAnalyze.filter(call => 
-                call.result === 'Missed' || call.result === 'No Answer'
+            const forwardedExternalNonCMD = callsWithCMDInfo.filter(call => 
+                (call.result === 'Accepted' || call.result === 'Call connected') && 
+                !isAnsweredByStaff(call) && !call.wentToCMD
             ).length;
-            const voicemails = dataToAnalyze.filter(call => call.result === 'Voicemail').length;
+            const missedCalls = callsWithCMDInfo.filter(call => 
+                (call.result === 'Missed' || call.result === 'No Answer') && !call.wentToCMD
+            ).length;
+            const voicemails = callsWithCMDInfo.filter(call => call.result === 'Voicemail').length;
+
+            // Calculate CMD-only calls (went straight to CMD, never rang RC)
+            let directToCMD = 0;
+            if (cmdData.length > 0 && selectedDepartment !== 'all') {
+                const deptMap = {
+                    'call-center': 'Call Center',
+                    'triage': 'Triage',
+                    'billing': 'Billing & Insurance',
+                    'referrals': 'Referrals'
+                };
+                const deptName = deptMap[selectedDepartment];
+                const deptCMDCalls = cmdData.filter(cmd => cmd.department === deptName);
+                const matchedPhones = new Set(callsWithCMDInfo.filter(c => c.wentToCMD).map(c => c.from?.phoneNumber));
+                directToCMD = deptCMDCalls.filter(cmd => !matchedPhones.has(cmd.fromPhone)).length;
+            }
 
             const staffAnswerRate = totalCalls > 0 ? ((staffAnswered / totalCalls) * 100).toFixed(1) : 0;
-            const overallAnswerRate = totalCalls > 0 ? (((staffAnswered + forwardedExternal) / totalCalls) * 100).toFixed(1) : 0;
-            const forwardRate = totalCalls > 0 ? ((forwardedExternal / totalCalls) * 100).toFixed(1) : 0;
+            const cmdRate = totalCalls > 0 ? ((wentToCMDAfterRing / totalCalls) * 100).toFixed(1) : 0;
 
             // Calculate average call duration (in seconds) - only for staff-answered calls
-            const staffAnsweredWithDuration = dataToAnalyze.filter(call => 
+            const staffAnsweredWithDuration = callsWithCMDInfo.filter(call => 
                 isAnsweredByStaff(call) && call.duration > 0
             );
             const avgDuration = staffAnsweredWithDuration.length > 0 
@@ -976,18 +1181,27 @@
             let comparisonText = '';
             if (useSessionGrouping) {
                 const rawCount = inboundOnly.length;
-                const diff = rawCount - totalCalls;
-                const groupedData = groupBySession(inboundOnly);
-                const multiLegCalls = groupedData.filter(s => s.legCount && s.legCount > 1).length;
+                const multiLegCalls = groupBySession(inboundOnly).filter(s => s.legCount && s.legCount > 1).length;
                 comparisonText = `<div class="kpi-comparison">Session-grouped: ${totalCalls} unique patient calls from ${rawCount} call records<br>${multiLegCalls} calls routed through queue/forwarding</div>`;
             }
             
+            // Build CMD integration status
+            let cmdStatus = '';
+            if (cmdData.length > 0) {
+                const matchedCount = callsWithCMDInfo.filter(c => c.wentToCMD).length;
+                cmdStatus = `<div class="kpi-comparison" style="background: #e3f2fd; border-left: 4px solid #2196f3;">
+                    📊 CallMyDoc: ${cmdData.length} total records | ${matchedCount} matched with RingCentral | ${directToCMD} went direct to CMD
+                </div>`;
+            }
+            
             kpiContainer.innerHTML = `
+                ${comparisonText}
+                ${cmdStatus}
+                
                 <div class="kpi-card">
                     <div class="kpi-label">Total Patient Calls</div>
                     <div class="kpi-value">${totalCalls.toLocaleString()}</div>
-                    <div class="kpi-subtitle">Incoming calls only</div>
-                    ${comparisonText}
+                    <div class="kpi-subtitle">${selectedDepartment !== 'all' ? selectedDepartment.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) + ' department' : 'All departments'}</div>
                 </div>
 
                 <div class="kpi-card">
@@ -1001,9 +1215,15 @@
                 </div>
 
                 <div class="kpi-card">
-                    <div class="kpi-label">Forwarded External</div>
-                    <div class="kpi-value">${forwardedExternal}</div>
-                    <div class="kpi-subtitle">${forwardRate}% answered by external (doctors, etc.)</div>
+                    <div class="kpi-label">CallMyDoc (After Ring)</div>
+                    <div class="kpi-value">${wentToCMDAfterRing}</div>
+                    <div class="kpi-subtitle">${cmdRate}% went to CMD after ringing staff</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-label">Other External Forward</div>
+                    <div class="kpi-value">${forwardedExternalNonCMD}</div>
+                    <div class="kpi-subtitle">${((forwardedExternalNonCMD/totalCalls)*100).toFixed(1)}% forwarded to other external</div>
                 </div>
 
                 <div class="kpi-card">
@@ -1018,17 +1238,21 @@
                     <div class="kpi-value">${formatDuration(avgDuration)}</div>
                     <div class="kpi-subtitle">${staffAnsweredWithDuration.length} staff-answered calls</div>
                 </div>
-
-                <div class="kpi-card">
-                    <div class="kpi-label">Went to Voicemail</div>
-                    <div class="kpi-value">${voicemails}</div>
-                    <div class="kpi-subtitle">${((voicemails/totalCalls)*100).toFixed(1)}% left message</div>
-                </div>
             `;
+            
+            // Add department breakdown if CMD data is loaded and no department filter
+            if (cmdData.length > 0 && selectedDepartment === 'all') {
+                renderDepartmentBreakdown(callsWithCMDInfo);
+            }
+            
+            // Add per-agent performance table
+            if (staffAnswered > 0) {
+                renderAgentPerformance(callsWithCMDInfo);
+            }
             
             updateWarningBox();
         }
-
+        
         // Format duration in seconds to readable format
         function formatDuration(seconds) {
             if (seconds < 60) return `${Math.round(seconds)}s`;
@@ -1037,10 +1261,150 @@
             return `${minutes}m ${secs}s`;
         }
 
+        // Render department breakdown cards
+        function renderDepartmentBreakdown(calls) {
+            const departments = ['Call Center', 'Triage', 'Billing & Insurance', 'Referrals'];
+            const deptStats = {};
+            
+            departments.forEach(dept => {
+                const deptCalls = calls.filter(c => c.department === dept);
+                const staffAnswered = deptCalls.filter(c => isAnsweredByStaff(c)).length;
+                const total = deptCalls.length;
+                const answerRate = total > 0 ? ((staffAnswered / total) * 100).toFixed(1) : 0;
+                
+                deptStats[dept] = { total, staffAnswered, answerRate };
+            });
+            
+            const kpiContainer = document.getElementById('kpiContainer');
+            const deptHTML = `
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+                    <h3 style="margin-bottom: 15px;">📊 Department Performance</h3>
+                    <div class="kpi-grid">
+                        ${departments.map(dept => {
+                            const stats = deptStats[dept];
+                            if (stats.total === 0) return '';
+                            return `
+                                <div class="kpi-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                                    <div class="kpi-label" style="color: rgba(255,255,255,0.9);">${dept}</div>
+                                    <div class="kpi-value">${stats.answerRate}%</div>
+                                    <div class="kpi-subtitle" style="color: rgba(255,255,255,0.8);">
+                                        ${stats.staffAnswered}/${stats.total} calls answered
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+            
+            kpiContainer.innerHTML += deptHTML;
+        }
+
+        // Render per-agent performance table
+        function renderAgentPerformance(calls) {
+            // Group calls by agent (answered by extension)
+            const agentStats = {};
+            
+            calls.forEach(call => {
+                if (isAnsweredByStaff(call)) {
+                    const ext = call.to?.extensionNumber || 'Unknown';
+                    const name = call.to?.name || `Ext ${ext}`;
+                    
+                    if (!agentStats[ext]) {
+                        agentStats[ext] = {
+                            name,
+                            extension: ext,
+                            answered: 0,
+                            total: 0,
+                            department: call.department || 'Unknown'
+                        };
+                    }
+                    agentStats[ext].answered++;
+                    agentStats[ext].total++;
+                }
+            });
+            
+            // Also count calls that rang but weren't answered by calculating from all staff calls
+            const staffExtensions = new Set(STAFF_WHITELIST.extensions);
+            calls.forEach(call => {
+                const targetExt = call.to?.extensionNumber;
+                if (targetExt && staffExtensions.has(targetExt)) {
+                    if (!agentStats[targetExt]) {
+                        agentStats[targetExt] = {
+                            name: call.to?.name || `Ext ${targetExt}`,
+                            extension: targetExt,
+                            answered: 0,
+                            total: 0,
+                            department: call.department || 'Unknown'
+                        };
+                    }
+                    if (!isAnsweredByStaff(call)) {
+                        agentStats[targetExt].total++;
+                    }
+                }
+            });
+            
+            const agents = Object.values(agentStats)
+                .filter(a => a.total > 0 || a.answered > 0)
+                .sort((a, b) => {
+                    const rateA = a.total > 0 ? (a.answered / a.total) : 0;
+                    const rateB = b.total > 0 ? (b.answered / b.total) : 0;
+                    return rateB - rateA;
+                });
+            
+            if (agents.length === 0) return;
+            
+            const kpiContainer = document.getElementById('kpiContainer');
+            const tableHTML = `
+                <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+                    <h3 style="margin-bottom: 15px;">👥 Agent Performance</h3>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px;">
+                            <thead>
+                                <tr style="background: #667eea; color: white;">
+                                    <th style="padding: 12px; text-align: left;">Agent</th>
+                                    <th style="padding: 12px; text-align: left;">Extension</th>
+                                    <th style="padding: 12px; text-align: left;">Department</th>
+                                    <th style="padding: 12px; text-align: center;">Calls Answered</th>
+                                    <th style="padding: 12px; text-align: center;">Total Calls</th>
+                                    <th style="padding: 12px; text-align: center;">Answer Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${agents.map((agent, i) => {
+                                    const rate = agent.total > 0 ? ((agent.answered / agent.total) * 100).toFixed(1) : 0;
+                                    const rateColor = rate >= 90 ? '#4caf50' : rate >= 80 ? '#ff9800' : '#e74c3c';
+                                    const bgColor = i % 2 === 0 ? '#f9f9f9' : 'white';
+                                    return `
+                                        <tr style="background: ${bgColor}; border-bottom: 1px solid #e0e0e0;">
+                                            <td style="padding: 12px;"><strong>${agent.name}</strong></td>
+                                            <td style="padding: 12px;">${agent.extension}</td>
+                                            <td style="padding: 12px;">${agent.department}</td>
+                                            <td style="padding: 12px; text-align: center;"><strong>${agent.answered}</strong></td>
+                                            <td style="padding: 12px; text-align: center;">${agent.total}</td>
+                                            <td style="padding: 12px; text-align: center;">
+                                                <span style="background: ${rateColor}; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 13px;">
+                                                    ${rate}%
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            kpiContainer.innerHTML += tableHTML;
+        }
+            
+
         // Render charts
         function renderCharts() {
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const selectedQueue = document.getElementById('queueFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
             
             // Filter to inbound only (patient calls)
             let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
@@ -1053,7 +1417,29 @@
                 });
             }
             
-            const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
+            let dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
+            
+            // Add CMD matching for department filtering
+            if (cmdData.length > 0) {
+                dataToAnalyze = dataToAnalyze.map(call => ({
+                    ...call,
+                    cmdMatch: matchWithCMD(call),
+                    department: matchWithCMD(call)?.department || 'Unknown'
+                }));
+                
+                // Filter by department if selected
+                if (selectedDepartment !== 'all') {
+                    const deptMap = {
+                        'call-center': 'Call Center',
+                        'triage': 'Triage',
+                        'billing': 'Billing & Insurance',
+                        'referrals': 'Referrals'
+                    };
+                    const deptName = deptMap[selectedDepartment];
+                    dataToAnalyze = dataToAnalyze.filter(call => call.department === deptName);
+                }
+            }
+            
             const groupBy = document.getElementById('groupBy').value;
             
             // Destroy existing charts
@@ -1224,6 +1610,7 @@
             const tbody = document.getElementById('callTableBody');
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const selectedQueue = document.getElementById('queueFilter').value;
+            const selectedDepartment = document.getElementById('departmentFilter').value;
             
             // Filter to inbound only (patient calls)
             let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
@@ -1236,7 +1623,29 @@
                 });
             }
             
-            const dataToShow = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
+            let dataToShow = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
+            
+            // Add CMD matching for department filtering
+            if (cmdData.length > 0) {
+                dataToShow = dataToShow.map(call => ({
+                    ...call,
+                    cmdMatch: matchWithCMD(call),
+                    department: matchWithCMD(call)?.department || 'Unknown'
+                }));
+                
+                // Filter by department if selected
+                if (selectedDepartment !== 'all') {
+                    const deptMap = {
+                        'call-center': 'Call Center',
+                        'triage': 'Triage',
+                        'billing': 'Billing & Insurance',
+                        'referrals': 'Referrals'
+                    };
+                    const deptName = deptMap[selectedDepartment];
+                    dataToShow = dataToShow.filter(call => call.department === deptName);
+                }
+            }
+            
             const recentCalls = dataToShow.slice(0, 100); // Show last 100 calls
 
             tbody.innerHTML = recentCalls.map(call => {
@@ -1356,6 +1765,37 @@
                         renderCharts();
                         renderCallTable();
                     }
+                });
+            }
+            
+            const departmentFilter = document.getElementById('departmentFilter');
+            if (departmentFilter) {
+                departmentFilter.addEventListener('change', function() {
+                    if (callsData.length > 0) {
+                        calculateKPIs();
+                        renderCharts();
+                        renderCallTable();
+                    }
+                });
+            }
+            
+            // Add event listener for CMD file upload
+            const cmdFileInput = document.getElementById('cmdFileInput');
+            if (cmdFileInput) {
+                cmdFileInput.addEventListener('change', function(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            parseCMDData(e.target.result);
+                        } catch (error) {
+                            document.getElementById('cmdStatus').innerHTML = 
+                                `<span style="color: #e74c3c;">❌ Error parsing CSV: ${error.message}</span>`;
+                        }
+                    };
+                    reader.readAsText(file);
                 });
             }
             
