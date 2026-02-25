@@ -1281,64 +1281,6 @@
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end
             return diffDays;
         }
-                const deptMap = {
-                    'call-center': 'Call Center',
-                    'triage': 'Triage',
-                    'billing': 'Billing & Insurance',
-                    'referrals': 'Referrals'
-                };
-                const deptName = deptMap[selectedDepartment];
-                callsWithCMDInfo = callsWithCMDInfo.filter(call => call.department === deptName);
-            }
-            
-            const totalCalls = callsWithCMDInfo.length;
-            
-            // Calculate metrics with CMD consideration
-            const staffAnswered = callsWithCMDInfo.filter(call => isAnsweredByStaff(call)).length;
-            const wentToCMDAfterRing = callsWithCMDInfo.filter(call => 
-                call.wentToCMD && !isAnsweredByStaff(call)
-            ).length;
-            const forwardedExternalNonCMD = callsWithCMDInfo.filter(call => 
-                (call.result === 'Accepted' || call.result === 'Call connected') && 
-                !isAnsweredByStaff(call) && !call.wentToCMD
-            ).length;
-            const missedCalls = callsWithCMDInfo.filter(call => 
-                (call.result === 'Missed' || call.result === 'No Answer') && !call.wentToCMD
-            ).length;
-            const voicemails = callsWithCMDInfo.filter(call => call.result === 'Voicemail').length;
-
-            // Calculate CMD-only calls (went straight to CMD, never rang RC)
-            let directToCMD = 0;
-            if (cmdData.length > 0 && selectedDepartment !== 'all') {
-                const deptMap = {
-                    'call-center': 'Call Center',
-                    'triage': 'Triage',
-                    'billing': 'Billing & Insurance',
-                    'referrals': 'Referrals'
-                };
-                const deptName = deptMap[selectedDepartment];
-                const deptCMDCalls = cmdData.filter(cmd => cmd.department === deptName);
-                const matchedPhones = new Set(callsWithCMDInfo.filter(c => c.wentToCMD).map(c => c.from?.phoneNumber));
-                directToCMD = deptCMDCalls.filter(cmd => !matchedPhones.has(cmd.fromPhone)).length;
-            }
-
-            const staffAnswerRate = totalCalls > 0 ? ((staffAnswered / totalCalls) * 100).toFixed(1) : 0;
-            const totalMissed = totalCalls - staffAnswered;
-            const missedRate = totalCalls > 0 ? ((totalMissed / totalCalls) * 100).toFixed(1) : 0;
-
-            // Calculate average call duration (in seconds) - only for staff-answered calls
-            const staffAnsweredWithDuration = callsWithCMDInfo.filter(call => 
-                isAnsweredByStaff(call) && call.duration > 0
-            );
-            const avgDuration = staffAnsweredWithDuration.length > 0 
-                ? staffAnsweredWithDuration.reduce((sum, call) => sum + call.duration, 0) / staffAnsweredWithDuration.length 
-                : 0;
-
-            // Display KPIs
-            const kpiContainer = document.getElementById('kpiContainer');
-            
-            let comparisonText = '';
-            if (useSessionGrouping) {
                 const rawCount = inboundOnly.length;
                 const multiLegCalls = groupBySession(inboundOnly).filter(s => s.legCount && s.legCount > 1).length;
                 comparisonText = `<div class="kpi-comparison">Session-grouped: ${totalCalls} unique patient calls from ${rawCount} call records<br>${multiLegCalls} calls routed through queue/forwarding</div>`;
