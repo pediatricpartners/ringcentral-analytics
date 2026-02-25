@@ -581,8 +581,8 @@
 
             <!-- Version Footer -->
             <div style="text-align: center; padding: 20px; color: #666; font-size: 12px; border-top: 1px solid #e0e0e0; margin-top: 40px; background: #f9f9f9;">
-                <strong>Dashboard Version:</strong> v3.0.0 - CallMyDoc Integration + Department Analytics<br>
-                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-cmd-departments | Last Updated: Feb 2, 2026 10:30 AM EST</span>
+                <strong>Dashboard Version:</strong> v3.1.0 - CMD Date Filtering + Manual Load<br>
+                <span style="font-size: 11px; color: #999;">Build: 2026-02-02-cmd-datefilter | Last Updated: Feb 2, 2026 11:15 AM EST</span>
             </div>
         </div>
     </div>
@@ -720,7 +720,8 @@
             
             initializeDates();
             await loadUserInfo();
-            await refreshData();
+            // Removed auto-load: await refreshData();
+            // User must now select dates and click "Update Dashboard"
             
             // Add event listener for session grouping checkbox
             document.getElementById('useSessionGrouping').addEventListener('change', function() {
@@ -811,12 +812,12 @@
             reader.readAsText(file);
         };
 
-        // Parse CallMyDoc CSV data
+        // Parse CallMyDoc CSV data and store all records
         function parseCMDData(csvText) {
             const lines = csvText.split('\n');
             const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
             
-            cmdData = [];
+            cmdData = []; // Reset
             
             for (let i = 1; i < lines.length; i++) {
                 if (!lines[i].trim()) continue;
@@ -852,20 +853,23 @@
                 const fromPhone = (record['From Phone'] || '').replace(/[^0-9]/g, '');
                 
                 if (fromPhone && date && time) {
-                    cmdData.push({
-                        dashboardName,
-                        department: mapCMDDepartment(dashboardName),
-                        date,
-                        time,
-                        fromPhone: '+1' + fromPhone,
-                        timestamp: parseDateTime(date, time),
-                        raw: record
-                    });
+                    const timestamp = parseCMDDateTime(date, time);
+                    if (timestamp) {
+                        cmdData.push({
+                            dashboardName,
+                            department: mapCMDDepartment(dashboardName),
+                            date,
+                            time,
+                            fromPhone: '+1' + fromPhone,
+                            timestamp: timestamp,
+                            raw: record
+                        });
+                    }
                 }
             }
             
             document.getElementById('cmdStatus').innerHTML = 
-                `<span style="color: #4caf50;">✅ Loaded ${cmdData.length} CallMyDoc records</span>`;
+                `<span style="color: #4caf50;">✅ Loaded ${cmdData.length} CallMyDoc records from file</span>`;
             
             // Recalculate metrics with CMD data
             if (callsData.length > 0) {
@@ -875,12 +879,21 @@
             }
         }
 
-        // Parse date/time from CallMyDoc format
-        function parseDateTime(date, time) {
-            // date format: "01/31/2026"
-            // time format: "9:32 AM"
+        // Parse date/time from CallMyDoc format (M/D/YY format)
+        function parseCMDDateTime(date, time) {
             try {
-                const [month, day, year] = date.split('/');
+                // date format: "1/31/26" or "01/31/2026"
+                // time format: "9:32 AM"
+                const dateParts = date.split('/');
+                let month = parseInt(dateParts[0]);
+                let day = parseInt(dateParts[1]);
+                let year = parseInt(dateParts[2]);
+                
+                // Handle 2-digit year
+                if (year < 100) {
+                    year += 2000;
+                }
+                
                 const timeParts = time.match(/(\d+):(\d+)\s*(AM|PM)/i);
                 if (!timeParts) return null;
                 
@@ -893,13 +906,26 @@
                 
                 return new Date(year, month - 1, day, hours, minutes).getTime();
             } catch (e) {
+                console.error('Error parsing CMD date/time:', date, time, e);
                 return null;
             }
         }
 
-        // Match RingCentral calls with CallMyDoc calls
-        function matchWithCMD(rcCall) {
-            if (cmdData.length === 0) return null;
+        // Filter CMD data by date range
+        function getFilteredCMDData(fromDate, toDate) {
+            if (cmdData.length === 0) return [];
+            
+            const fromTime = new Date(fromDate).getTime();
+            const toTime = new Date(toDate + 'T23:59:59').getTime();
+            
+            return cmdData.filter(cmd => {
+                return cmd.timestamp >= fromTime && cmd.timestamp <= toTime;
+            });
+        }
+
+        // Match RingCentral calls with CallMyDoc calls (using filtered CMD data)
+        function matchWithCMD(rcCall, filteredCMDData) {
+            if (!filteredCMDData || filteredCMDData.length === 0) return null;
             
             const rcPhone = rcCall.from?.phoneNumber;
             const rcTime = new Date(rcCall.startTime).getTime();
@@ -909,7 +935,7 @@
             // Find CMD call within 2-minute window
             const twoMinutes = 2 * 60 * 1000;
             
-            for (const cmdCall of cmdData) {
+            for (const cmdCall of filteredCMDData) {
                 if (cmdCall.fromPhone === rcPhone) {
                     const timeDiff = Math.abs(cmdCall.timestamp - rcTime);
                     if (timeDiff <= twoMinutes) {
@@ -1095,6 +1121,11 @@
             const groupBy = document.getElementById('groupBy').value;
             const selectedQueue = document.getElementById('queueFilter').value;
             const selectedDepartment = document.getElementById('departmentFilter').value;
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            
+            // Get CMD data filtered by selected date range
+            const filteredCMDData = getFilteredCMDData(fromDate, toDate);
             
             // Filter to inbound only (patient calls)
             let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
@@ -1110,9 +1141,9 @@
             // Use session-based data if enabled
             const dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             
-            // Match with CallMyDoc data and categorize
+            // Match with CallMyDoc data and categorize (using filtered CMD data)
             let callsWithCMDInfo = dataToAnalyze.map(call => {
-                const cmdMatch = matchWithCMD(call);
+                const cmdMatch = matchWithCMD(call, filteredCMDData);
                 return {
                     ...call,
                     cmdMatch: cmdMatch,
@@ -1122,7 +1153,7 @@
             });
             
             // Filter by department if selected
-            if (cmdData.length > 0 && selectedDepartment !== 'all') {
+            if (filteredCMDData.length > 0 && selectedDepartment !== 'all') {
                 const deptMap = {
                     'call-center': 'Call Center',
                     'triage': 'Triage',
@@ -1189,8 +1220,10 @@
             let cmdStatus = '';
             if (cmdData.length > 0) {
                 const matchedCount = callsWithCMDInfo.filter(c => c.wentToCMD).length;
+                const totalCMD = cmdData.length;
+                const filteredCMD = filteredCMDData.length;
                 cmdStatus = `<div class="kpi-comparison" style="background: #e3f2fd; border-left: 4px solid #2196f3;">
-                    📊 CallMyDoc: ${cmdData.length} total records | ${matchedCount} matched with RingCentral | ${directToCMD} went direct to CMD
+                    📊 CallMyDoc: ${filteredCMD} records in date range (${totalCMD} total in file) | ${matchedCount} matched with RingCentral | ${directToCMD} went direct to CMD
                 </div>`;
             }
             
@@ -1405,6 +1438,11 @@
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const selectedQueue = document.getElementById('queueFilter').value;
             const selectedDepartment = document.getElementById('departmentFilter').value;
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            
+            // Get CMD data filtered by selected date range
+            const filteredCMDData = getFilteredCMDData(fromDate, toDate);
             
             // Filter to inbound only (patient calls)
             let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
@@ -1420,11 +1458,11 @@
             let dataToAnalyze = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             
             // Add CMD matching for department filtering
-            if (cmdData.length > 0) {
+            if (filteredCMDData.length > 0) {
                 dataToAnalyze = dataToAnalyze.map(call => ({
                     ...call,
-                    cmdMatch: matchWithCMD(call),
-                    department: matchWithCMD(call)?.department || 'Unknown'
+                    cmdMatch: matchWithCMD(call, filteredCMDData),
+                    department: matchWithCMD(call, filteredCMDData)?.department || 'Unknown'
                 }));
                 
                 // Filter by department if selected
@@ -1611,6 +1649,11 @@
             const useSessionGrouping = document.getElementById('useSessionGrouping').checked;
             const selectedQueue = document.getElementById('queueFilter').value;
             const selectedDepartment = document.getElementById('departmentFilter').value;
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            
+            // Get CMD data filtered by selected date range
+            const filteredCMDData = getFilteredCMDData(fromDate, toDate);
             
             // Filter to inbound only (patient calls)
             let inboundOnly = callsData.filter(call => call.direction === 'Inbound');
@@ -1626,11 +1669,11 @@
             let dataToShow = useSessionGrouping ? groupBySession(inboundOnly) : inboundOnly;
             
             // Add CMD matching for department filtering
-            if (cmdData.length > 0) {
+            if (filteredCMDData.length > 0) {
                 dataToShow = dataToShow.map(call => ({
                     ...call,
-                    cmdMatch: matchWithCMD(call),
-                    department: matchWithCMD(call)?.department || 'Unknown'
+                    cmdMatch: matchWithCMD(call, filteredCMDData),
+                    department: matchWithCMD(call, filteredCMDData)?.department || 'Unknown'
                 }));
                 
                 // Filter by department if selected
